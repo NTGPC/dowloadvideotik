@@ -1,0 +1,27 @@
+# FIX LỖI PORT 9222
+
+## VẤN ĐỀ:
+Chrome cũ chưa chết hẳn → Chrome mới không mở được port 9222
+
+## GIẢI PHÁP:
+OPEN_CHROME.bat giờ kill Chrome 2 LẦN để chắc chắn
+
+## QUY TRÌNH:
+
+### 1. ĐÓNG TẤT CẢ
+Đóng TẤT CẢ Chrome và CMD đang mở
+
+### 2. CHẠY OPEN_CHROME.bat
+- Kill Chrome 2 lần
+- Đợi 15 giây
+
+### 3. TEST.bat
+Kiểm tra port có sẵn sàng không
+
+### 4. RUN_ALL.bat
+Nếu TEST báo "SẴN SÀNG"
+
+---
+
+**QUAN TRỌNG:**
+Đóng HẾT Chrome trước khi bắt đầu!

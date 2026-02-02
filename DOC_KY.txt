@@ -1,0 +1,45 @@
+# CỰC KỲ QUAN TRỌNG - ĐỌC KỸ!
+
+## BƯỚC 1: DOUBLE-CLICK FILE
+```
+RUN_ALL.bat
+```
+
+## BƯỚC 2: ĐỢI
+- Cửa sổ CMD (màu đen) sẽ mở
+- Chrome sẽ tự động mở
+- Đợi khoảng 10 giây
+
+## BƯỚC 3: NHẬP USERNAME
+⚠️ **QUAN TRỌNG: NHẬP VÀO CỬA SỔ CMD (MÀU ĐEN), KHÔNG PHẢI CHROME!**
+
+Khi thấy dòng:
+```
+📌 Nhập @username hoặc full URL:
+```
+
+→ GÕ VÀO CỬA SỔ CMD: `xoaingotaudio`
+→ NHẤN ENTER
+
+## BƯỚC 4: ĐỢI KẾT QUẢ
+- Script sẽ tự scroll
+- Thu thập video
+- Tạo file Excel trong folder `output/`
+
+---
+
+## NẾU BỊ LỖI
+
+1. Đóng TẤT CẢ Chrome thủ công
+2. Chạy lại `RUN_ALL.bat`
+3. Đợi 10 giây trước khi làm gì
+
+---
+
+## TÓM TẮT
+
+1. Click `RUN_ALL.bat`
+2. Đợi Chrome mở
+3. Nhập `xoaingotaudio` VÀO CỬA SỔ CMD (không phải Chrome)
+4. Nhấn Enter
+5. Đợi file Excel

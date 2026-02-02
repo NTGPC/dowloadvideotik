@@ -1,0 +1,25 @@
+# CÁCH DÙNG - 2 BƯỚC
+
+## BƯỚC 1: MỞ CHROME
+Double-click: **OPEN_CHROME.bat**
+
+Nó sẽ:
+- Đóng tất cả Chrome cũ
+- Mở Chrome mới với debugging
+- Mở trang TikTok
+
+→ Đăng nhập TikTok nếu chưa login
+
+## BƯỚC 2: CHẠY SCRAPER
+Double-click: **RUN_ALL.bat**
+
+Nhập username khi được hỏi: `xoaingotaudio`
+
+→ File Excel ra trong folder `output/`
+
+---
+
+## LƯU Ý
+- Chỉ cần mở Chrome 1 LẦN (Bước 1)
+- Sau đó có thể chạy Bước 2 nhiều lần
+- Chrome phải MỞ TRƯỚC khi chạy RUN_ALL.bat

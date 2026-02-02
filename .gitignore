@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+
+# Excel files (output)
+*.xlsx
+*.xls
+~$*.xlsx
+~$*.xls
+
+# Chrome profiles and cache
+chrome_profile/
+tiktok_scraper_profile/
+drivers/
+
+# ChromeDriver
+chromedriver.exe
+*.exe
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log

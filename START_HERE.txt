@@ -1,0 +1,14 @@
+# CÁCH CHẠY - ĐƠN GIẢN
+
+1. Double-click: **OPEN_CHROME.bat**
+   Đợi màn hình hiện "Chrome da san sang!"
+
+2. Double-click: **RUN_ALL.bat**  
+   Nhập: xoaingotaudio
+   Nhấn Enter
+
+3. Đợi - File Excel ra trong `output/`
+
+---
+
+NẾU LỖI: Đóng TẤT CẢ Chrome + CMD, làm lại từ bước 1

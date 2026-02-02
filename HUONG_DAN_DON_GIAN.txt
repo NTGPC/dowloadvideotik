@@ -1,0 +1,31 @@
+# CÁCH DÙNG - CỰC KỲ ĐƠN GIẢN
+
+## CHỈ 1 BƯỚC:
+
+Double-click: **START.bat**
+
+Nhập username khi được hỏi: `xoaingotaudio`
+
+Nhấn Enter
+
+Đợi file Excel trong `output/`
+
+---
+
+## NẾU LỖI:
+
+1. Đóng TẤT CẢ Chrome và CMD
+2. Chạy lại: START.bat
+
+---
+
+## FILE `START.bat` LÀM GÌ:
+
+1. Đóng tất cả Chrome
+2. Mở Chrome mới với debugging port
+3. Đợi 10 giây cho Chrome sẵn sàng
+4. Tự động chạy Python script
+5. Hỏi bạn nhập username
+6. Tạo file Excel
+
+Tất cả tự động trong 1 file!

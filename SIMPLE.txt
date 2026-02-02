@@ -1,0 +1,16 @@
+# CÁCH DÙNG
+
+1. Double-click: **RUN_ALL.bat**
+2. Đợi Chrome mở và chạy
+3. File Excel trong folder `output/`
+
+## Đổi username
+
+Mở file `tiktok_scraper.py`, tìm dòng:
+```python
+username = "xoaingotaudio"
+```
+
+Đổi thành username khác, save, chạy lại.
+
+Xong.

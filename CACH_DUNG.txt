@@ -1,0 +1,29 @@
+# CÁCH DÙNG CỰC KỲ ĐƠN GIẢN
+
+## DOUBLE-CLICK FILE NÀY:
+```
+RUN_ALL.bat
+```
+
+## Chỉ vậy thôi!
+
+Script sẽ tự động:
+1. Đóng tất cả Chrome
+2. Mở Chrome với debugging  
+3. Chạy Python script
+4. Hỏi bạn nhập @username
+5. Tạo file Excel
+
+---
+
+## CHÚ Ý
+
+❗ **NẾU ĐANG CÓ CHROME MỞ, NÓ SẼ ĐÓNG HẾT!**  
+   Lưu công việc trước khi chạy
+
+❗ Nhập username khi được hỏi, ví dụ:
+   - `xoaingotaudio`
+   - `@xoaingotaudio`
+   - `https://www.tiktok.com/@xoaingotaudio`
+
+❗ File Excel sẽ trong folder `output/`

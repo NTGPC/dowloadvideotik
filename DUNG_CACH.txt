@@ -1,0 +1,27 @@
+# ĐÚNG CÁCH - DÙNG CHROME ĐÃ ĐĂNG NHẬP
+
+## BƯỚC 1: MỞ CHROME
+Double-click: **OPEN_CHROME.bat**
+Đợi 10 giây
+(Chrome sẽ mở TikTok, bạn đã login sẵn)
+
+## BƯỚC 2: CHẠY SCRAPER  
+Double-click: **RUN_ALL.bat**
+Nhập username: `xoaingotaudio`
+Nhấn Enter
+
+→ Script sẽ KẾT NỐI vào Chrome BẠN VỪA MỞ Ở BƯỚC 1
+→ File Excel ra trong `output/`
+
+---
+
+## QUAN TRỌNG:
+- Chrome ở Bước 1 phải VẪN MỞ khi chạy Bước 2
+- KHÔNG đóng Chrome giữa 2 bước
+- Script sẽ dùng Chrome ĐÃ LOGIN của bạn
+
+---
+
+## NẾU LỖI:
+1. Đóng TẤT CẢ Chrome và CMD
+2. Làm lại từ Bước 1

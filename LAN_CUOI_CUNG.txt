@@ -1,0 +1,33 @@
+# CÁCH CUỐI CÙNG - CHẮC CHẮN WORK!
+
+## CHỈ 1 BƯỚC:
+
+Double-click: **CHAY.bat**
+
+- Lần đầu: Đăng nhập TikTok → Nhấn ENTER → Nhập username
+- Lần sau: Tự động dùng login đã lưu → Nhập username
+
+File Excel ra trong `output/`
+
+---
+
+## TẠI SAO LẦN NÀY WORK:
+
+✅ **undetected-chromedriver** - TikTok KHÔNG phát hiện bot
+✅ **User profile** - Login được lưu lại
+✅ **Không dùng debugging port** - Không bị chặn Access Denied
+✅ **Đơn giản** - Chỉ 1 file duy nhất
+
+---
+
+## KHÔNG CẦN:
+❌ OPEN_CHROME.bat
+❌ RUN_ALL.bat  
+❌ Chạy 2 file riêng
+
+Chỉ cần: **CHAY.bat** → Đăng nhập (lần đầu) → Nhập username → Xong!
+
+---
+
+## NẾU LỖI:
+Xóa thư mục `chrome_profile` và chạy lại

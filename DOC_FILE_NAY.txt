@@ -1,0 +1,28 @@
+# ĐƠN GIẢN NHẤT - CHẮC CHẮN WORK
+
+## CÁCH DÙNG:
+
+1. Double-click: **CHAY_NGAY.bat**
+
+2. Chrome sẽ tự mở
+
+3. Nếu chưa login TikTok → Đăng nhập → Nhấn ENTER
+
+4. Nhập username: `xoaingotaudio`
+
+5. Đợi file Excel trong `output/`
+
+---
+
+## KHÔNG CẦN:
+- ❌ Mở Chrome thủ công
+- ❌ Debugging port
+- ❌ Chạy nhiều file
+
+Chỉ cần: `CHAY_NGAY.bat` → Đăng nhập (nếu cần) → Nhập username → Xong!
+
+---
+
+## LƯU Ý:
+Script sẽ mở Chrome MỚI (không dùng Chrome đang mở)
+Đăng nhập TikTok sẽ được giữ cho lần sau

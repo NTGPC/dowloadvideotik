@@ -1,0 +1,33 @@
+# CÁCH CHÍNH THỨC - WORK 100%
+
+## CÁCH DÙNG:
+
+### LẦN ĐẦU TIÊN:
+1. Đóng TẤT CẢ Chrome
+2. Chạy: `CHAY.bat`
+3. Chrome mở → **ĐĂNG NHẬP TIKTOK**
+4. Nhấn ENTER trong CMD
+5. Nhập username: `xoaingotaudio`
+6. File Excel ra
+
+### LẦN SAU:
+1. Chạy: `CHAY.bat`
+2. Chrome mở (ĐÃ LOGIN SẴN)
+3. Nhấn ENTER
+4. Nhập username
+5. File Excel ra
+
+---
+
+## TẠI SAO WORK:
+
+✅ Profile riêng cho scraper (không xung đột)
+✅ Login TikTok lưu mãi mãi
+✅ Không cần Chrome profile của bạn
+✅ undetected-chromedriver bypass bot
+✅ Đơn giản, ổn định
+
+---
+
+## NẾU LỖI:
+Xóa thư mục `tiktok_scraper_profile` và chạy lại

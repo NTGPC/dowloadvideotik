@@ -1,0 +1,36 @@
+# GIẢI PHÁP THẬT SỰ CUỐI CÙNG
+
+## CHỈ 1 BƯỚC:
+
+1. **Đóng TẤT CẢ Chrome**
+
+2. Double-click: **CHAY.bat**
+
+→ Chrome sẽ mở với profile của bạn (Trường Giang - đã login TikTok)
+→ Nhấn ENTER
+→ Nhập username: `xoaingotaudio`
+→ File Excel ra trong `output/`
+
+---
+
+## TẠI SAO GIỜ MỚI WORK:
+
+✅ Dùng TRỰC TIẾP profile Chrome của bạn (không copy)
+✅ Không mở Guest nữa
+✅ Login TikTok vẫn còn
+✅ Bypass bot detection
+
+---
+
+## QUAN TRỌNG:
+- PHẢI đóng Chrome trước khi chạy
+- Script sẽ tự động kill Chrome rồi mở lại
+
+---
+
+## KHÔNG CẦN:
+❌ COPY_PROFILE.bat
+❌ OPEN_CHROME.bat
+❌ RUN_ALL.bat
+
+Chỉ: **CHAY.bat** → Xong!

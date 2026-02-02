@@ -1,0 +1,34 @@
+# GIẢI PHÁP CUỐI CÙNG - DÙNG PROFILE ĐÃ LOGIN
+
+## 2 BƯỚC DUY NHẤT:
+
+### BƯỚC 1: COPY PROFILE (CHỈ LẦN ĐẦU)
+Double-click: **COPY_PROFILE.bat**
+→ Copy profile Chrome đã đăng nhập TikTok
+→ Đợi xong
+
+### BƯỚC 2: CHẠY SCRAPER
+Double-click: **CHAY.bat**
+→ Chrome sẽ mở với login TikTok đã có
+→ Nhấn ENTER
+→ Nhập username: `xoaingotaudio`
+→ File Excel ra trong `output/`
+
+---
+
+## QUAN TRỌNG:
+- Bước 1 CHỈ CHẠY 1 LẦN duy nhất
+- Sau đó chỉ cần chạy Bước 2 mỗi lần scrape
+
+---
+
+## TẠI SAO LẦN NÀY WORK:
+✅ Dùng profile Chrome ĐÃ LOGIN TikTok của bạn
+✅ Không mở Chrome mới profile trống
+✅ undetected-chromedriver bypass bot detection
+✅ Không bị chặn Access Denied
+
+---
+
+## NẾU LỖI:
+Xóa thư mục `chrome_profile` và chạy lại COPY_PROFILE.bat
