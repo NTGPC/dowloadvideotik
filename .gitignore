@@ -15,6 +15,9 @@ env/
 ~$*.xlsx
 ~$*.xls
 
+# Downloads folder
+Downloads/
+
 # Chrome profiles and cache
 chrome_profile/
 tiktok_scraper_profile/
