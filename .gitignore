@@ -1,31 +1,59 @@
-# Python
+# Bỏ qua thư mục chứa video và dữ liệu TikTok
+TIKTOK_DATA/
+Downloads/
+
+# Bỏ qua Chrome profiles và drivers (file lớn)
+chrome_profile/
+tiktok_scraper_profile/
+drivers/
+chromedriver.exe
+
+# Bỏ qua các file Excel
+*.xlsx
+*.xls
+
+# Bỏ qua các file video
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.flv
+*.wmv
+*.webm
+
+# Bỏ qua các file ảnh thumbnail
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.webp
+
+# Python cache
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-.venv/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
 venv/
 ENV/
 env/
-
-# Excel files (output)
-*.xlsx
-*.xls
-~$*.xlsx
-~$*.xls
-
-# Downloads folder
-Downloads/
-
-# Chrome profiles and cache
-chrome_profile/
-tiktok_scraper_profile/
-drivers/
-
-# ChromeDriver
-chromedriver.exe
-*.exe
 
 # IDE
 .vscode/
