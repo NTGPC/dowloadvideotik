@@ -8,6 +8,14 @@ tiktok_scraper_profile/
 drivers/
 chromedriver.exe
 
+# Bỏ qua ffmpeg (file rất lớn)
+ffmpeg.exe
+ffmpeg-master-latest-win64-gpl/
+ffmpeg-master-latest-win64-gpl.zip
+
+# Bỏ qua file CSV backup
+*.csv
+
 # Bỏ qua các file Excel
 *.xlsx
 *.xls
@@ -52,6 +60,7 @@ wheels/
 
 # Virtual Environment
 venv/
+.venv/
 ENV/
 env/
 
