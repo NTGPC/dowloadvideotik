@@ -8,6 +8,8 @@ import requests
 import subprocess 
 import re 
 from playwright.async_api import async_playwright
+# --- THÊM THƯ VIỆN AI ---
+from faster_whisper import WhisperModel
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, 
@@ -19,7 +21,51 @@ from PyQt6.QtGui import QColor, QFont, QAction, QCursor, QPixmap, QIcon, QPainte
 BASE_DATA_FOLDER = "TIKTOK_DATA"
 
 # ============================================================================
-# 1. RENDER ENGINE (ĐÃ SỬA LỖI LẬT NGƯỢC/XUÔI)
+# 0. AI SUBTITLE GENERATOR (NEW)
+# ============================================================================
+class AISubtitleGenerator:
+    def __init__(self):
+        # Tự động chọn CUDA (GPU) nếu có, không thì dùng CPU
+        try:
+            result = subprocess.run(["nvidia-smi"], capture_output=True, startupinfo=subprocess.STARTUPINFO())
+            device = "cuda" if result.returncode == 0 else "cpu"
+        except FileNotFoundError:
+            device = "cpu"
+        # Dùng model 'base' để cân bằng giữa tốc độ và độ chính xác tiếng Việt
+        self.model = WhisperModel("base", device=device, compute_type="int8")
+
+    def format_time(self, seconds):
+        m, s = divmod(seconds, 60)
+        h, m = divmod(m, 60)
+        return f"{int(h)}:{int(m):02d}:{s:05.2f}"
+
+    def create_sub(self, video_path, output_ass):
+        segments, info = self.model.transcribe(video_path, beam_size=5, language="vi")
+        
+        # Style này giúp chữ hiện ở giữa dưới, màu vàng viền đen (Style Tóp Tóp)
+        ass_header = """[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: TikTokStyle,Arial,75,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,0,2,10,10,250,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+        with open(output_ass, "w", encoding="utf-8") as f:
+            f.write(ass_header)
+            for segment in segments:
+                start = self.format_time(segment.start)
+                end = self.format_time(segment.end)
+                text = segment.text.strip().upper() # Viết hoa cho chuyên nghiệp
+                f.write(f"Dialogue: 0,{start},{end},TikTokStyle,,0,0,0,,{text}\n")
+        return True
+
+# ============================================================================
+# 1. RENDER ENGINE (CẬP NHẬT FILTER SUB)
 # ============================================================================
 class RenderEngine:
     def __init__(self):
@@ -42,18 +88,22 @@ class RenderEngine:
         cmd = [self.ffmpeg_exe, '-y', '-i', input_path]
         filter_chain = []
         
-        # 1. Xử lý Video nền (Flip, Speed)
+        # 1. Video Filters cơ bản
         bg_filters = []
         if options['flip']: bg_filters.append("hflip") # Lật ngang
         if options['speed_1_1']: bg_filters.append("setpts=PTS/1.1")
         
-        # Đặt tên cho stream video nền sau khi xử lý là [bg]
+        # 2. XỬ LÝ SUBTITLES (MỚI)
+        if options.get('sub_path'):
+            # FFmpeg yêu cầu escape đường dẫn sub (thay \ thành / và : thành \:)
+            escaped_sub = options['sub_path'].replace("\\", "/").replace(":", "\\:")
+            bg_filters.append(f"subtitles='{escaped_sub}':force_style='Alignment=2'")
+
+        # Gộp filter cho video gốc
         if bg_filters:
-            # Lệnh: [0:v]hflip,setpts=...[bg]
             filter_chain.append(f"[0:v]{','.join(bg_filters)}[bg]")
             bg_stream = "[bg]"
         else:
-            # Nếu không filter gì cả, đặt tên [0:v] thành [bg] (qua lệnh null) để thống nhất
             filter_chain.append("[0:v]null[bg]")
             bg_stream = "[bg]"
 
@@ -182,19 +232,45 @@ class ScraperWorker(QThread):
 class RenderWorker(QThread):
     progress_signal = pyqtSignal(int, str)
     finished_signal = pyqtSignal()
-    def __init__(self, items, options): super().__init__(); self.items = items; self.options = options; self.engine = RenderEngine()
+    def __init__(self, items, options):
+        super().__init__()
+        self.items = items
+        self.options = options
+        self.engine = RenderEngine()
+        self.ai_sub = AISubtitleGenerator() if options.get('use_ai_sub') else None # Khởi tạo AI nếu cần
+
     def run(self):
         total = len(self.items)
         for i, item in enumerate(self.items):
             input_path = item['Local_Path']
             if not input_path or not os.path.exists(input_path): continue
-            folder = os.path.dirname(input_path); render_folder = os.path.join(folder, "Rendered"); os.makedirs(render_folder, exist_ok=True)
-            name = os.path.basename(input_path); name_no_ext, ext = os.path.splitext(name)
-            output_path = os.path.join(render_folder, f"{name_no_ext}_EDITED{ext}")
-            self.progress_signal.emit(int((i / total) * 100), f"🎬 Render ({i+1}/{total}): {name[:20]}...")
+            
+            folder = os.path.dirname(input_path)
+            render_folder = os.path.join(folder, "Rendered")
+            os.makedirs(render_folder, exist_ok=True)
+            name_no_ext = os.path.splitext(os.path.basename(input_path))[0]
+            output_path = os.path.join(render_folder, f"{name_no_ext}_EDITED.mp4")
+
+            # --- BƯỚC MỚI: TẠO SUB BẰNG AI ---
+            if self.ai_sub:
+                self.progress_signal.emit(int((i / total) * 100), f"🧠 AI đang nghe: {name_no_ext[:15]}...")
+                ass_path = os.path.join(render_folder, f"{name_no_ext}.ass")
+                try:
+                    self.ai_sub.create_sub(input_path, ass_path)
+                    self.options['sub_path'] = ass_path
+                except Exception as e:
+                    self.progress_signal.emit(int((i / total) * 100), f"⚠️ Lỗi AI Sub: {str(e)}")
+                    self.options['sub_path'] = None
+            else:
+                self.options['sub_path'] = None
+
+            # --- BƯỚC RENDER ---
+            self.progress_signal.emit(int((i / total) * 100), f"🎬 Rendering ({i+1}/{total}): {name_no_ext[:15]}...")
             success, msg = self.engine.render_video(input_path, output_path, self.options)
-            if success: self.progress_signal.emit(int(((i+1) / total) * 100), f"✅ Xong: {name[:20]}")
+            
+            if success: self.progress_signal.emit(int(((i+1) / total) * 100), f"✅ Xong: {name_no_ext[:15]}")
             else: self.progress_signal.emit(int(((i+1) / total) * 100), f"❌ Lỗi: {msg}")
+            
         self.finished_signal.emit()
 
 # ============================================================================
@@ -233,7 +309,10 @@ class EmbeddedEditorWidget(QWidget):
         left_panel = QFrame(); left_panel.setFixedWidth(300); left_layout = QVBoxLayout(left_panel)
         g_vid = QGroupBox("1. HÌNH ẢNH"); l_vid = QVBoxLayout()
         self.chk_flip = QCheckBox("Lật Ngược"); self.chk_flip.stateChanged.connect(self.update_preview)
-        self.chk_speed = QCheckBox("Tăng Tốc 1.1x"); l_vid.addWidget(self.chk_flip); l_vid.addWidget(self.chk_speed); g_vid.setLayout(l_vid)
+        self.chk_speed = QCheckBox("Tăng Tốc 1.1x")
+        self.chk_ai_sub = QCheckBox("🧠 Tạo Sub Tiếng Việt (AI)")
+        self.chk_ai_sub.setStyleSheet("color: #d63384; font-weight: bold;")
+        l_vid.addWidget(self.chk_flip); l_vid.addWidget(self.chk_speed); l_vid.addWidget(self.chk_ai_sub); g_vid.setLayout(l_vid)
 
         g_aud = QGroupBox("2. ÂM THANH"); l_aud = QHBoxLayout()
         self.chk_mute = QCheckBox("Tắt Tiếng"); self.chk_mute.stateChanged.connect(self.update_audio_visual)
@@ -335,7 +414,8 @@ class EmbeddedEditorWidget(QWidget):
 
     def get_options(self):
         return { 
-            'flip': self.chk_flip.isChecked(), 'speed_1_1': self.chk_speed.isChecked(), 'mute_audio': self.chk_mute.isChecked(), 
+            'flip': self.chk_flip.isChecked(), 'speed_1_1': self.chk_speed.isChecked(), 'mute_audio': self.chk_mute.isChecked(),
+            'use_ai_sub': self.chk_ai_sub.isChecked(),
             'logo_path': self.lbl_logo_path.property("path") if self.lbl_logo_path.property("path") else "",
             'logo_x': self.sl_x.value(), 'logo_y': self.sl_y.value(), 'logo_scale': self.sl_scale.value(),
             'logo_opacity': self.sl_opacity.value()
