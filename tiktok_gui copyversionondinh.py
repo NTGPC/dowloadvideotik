@@ -30,8 +30,8 @@ BASE_DATA_FOLDER = "TIKTOK_DATA"
 # ============================================================================
 class AISubtitleGenerator:
     def __init__(self):
-        # Nâng cấp lên model có word_timestamps
-        self.model = WhisperModel("base", device="cuda", compute_type="int8_float16")
+        # Chuyển sang 'cpu' và 'int8' để không bao giờ bị lỗi thiếu DLL nữa
+        self.model = WhisperModel("base", device="cpu", compute_type="int8")
 
     def format_time_ass(self, seconds):
         m, s = divmod(seconds, 60)
@@ -40,15 +40,14 @@ class AISubtitleGenerator:
 
     def create_sub_karaoke(self, video_path, output_ass, color_hex="#FFFF00", effect_type="Karaoke"):
         # Chuyển Hex (RGB) sang định dạng ASS (BGR)
-        # Ví dụ: #FF0000 (Đỏ) -> &H0000FF&
-        r = color_hex[1:3]
-        g = color_hex[3:5]
-        b = color_hex[5:7]
-        ass_color = f"&H00{b}{g}{r}&"
+        r, g, b = color_hex[1:3], color_hex[3:5], color_hex[5:7]
+        ass_color = f"&H00{b}{g}{r}&" # Màu bro chọn (Màu sáng lên)
+        bg_color = "&H00FFFFFF&"     # Màu mặc định (Trắng - lúc chưa đọc tới)
 
-        # Transcribe với word_timestamps để lấy thời gian từng từ
+        # Transcribe lấy thời gian từng từ
         segments, info = self.model.transcribe(video_path, beam_size=5, language="vi", word_timestamps=True)
         
+        # Style này cực giống TikTok: Chữ to (95), viền dày (5), nằm cao (MarginV: 500)
         ass_header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
@@ -56,7 +55,7 @@ PlayResY: 1920
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: TikTokStyle,Arial,85,{ass_color},&H00FFFFFF&,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,0,2,10,10,400,1
+Style: TikTokStyle,Arial,95,{ass_color},{bg_color},&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,5,0,2,10,10,500,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -67,22 +66,22 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 words = list(segment.words)
                 if not words: continue
 
-                # Giới hạn dòng: Cứ 5 từ thì ngắt 1 câu để tránh tràn màn hình
-                chunk_size = 5 
+                # Cắt dòng 4 từ một để chữ to không bị tràn màn hình
+                chunk_size = 4 
                 for i in range(0, len(words), chunk_size):
                     chunk = words[i:i + chunk_size]
                     start_time = self.format_time_ass(chunk[0].start)
                     end_time = self.format_time_ass(chunk[-1].end)
                     
-                    # Tạo hiệu ứng Karaoke
                     line_text = ""
                     for w in chunk:
-                        duration = int((w.end - w.start) * 100) # Centiseconds
-                        clean_word = w.word.strip().upper()
+                        # Thời gian chạy của mỗi từ (centiseconds)
+                        duration = int((w.end - w.start) * 100)
+                        word_clean = w.word.strip().upper()
                         if effect_type == "Karaoke":
-                            line_text += f"{{\\k{duration}}}{clean_word} "
+                            line_text += f"{{\\k{duration}}}{word_clean} "
                         else:
-                            line_text += f"{clean_word} "
+                            line_text += f"{word_clean} "
                     
                     f.write(f"Dialogue: 0,{start_time},{end_time},TikTokStyle,,0,0,0,,{line_text.strip()}\n")
         return True
@@ -340,7 +339,7 @@ class EmbeddedEditorWidget(QWidget):
         self.chk_ai_sub = QCheckBox("🧠 Tạo Sub Tiếng Việt (AI)")
         self.chk_ai_sub.setStyleSheet("color: #d63384; font-weight: bold;")
 
-        # --- UI chọn màu & hiệu ứng Sub ---
+        # --- Nút chọn màu ---
         self.btn_pick_color = QPushButton("🎨 Chọn Màu Chữ")
         self.btn_pick_color.clicked.connect(self.pick_sub_color)
         self.current_sub_color = "#FFFF00"  # Mặc định vàng
@@ -348,6 +347,7 @@ class EmbeddedEditorWidget(QWidget):
         self.lbl_color_demo.setFixedSize(20, 20)
         self.lbl_color_demo.setStyleSheet(f"background-color: {self.current_sub_color}; border: 1px solid white;")
 
+        # --- Chọn hiệu ứng ---
         self.combo_effect = QComboBox()
         self.combo_effect.addItems(["Karaoke (Chữ chạy)", "Hiện từng dòng"])
 
