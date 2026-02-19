@@ -341,26 +341,25 @@ class EmbeddedEditorWidget(QWidget):
         self.chk_ai_sub.setStyleSheet("color: #d63384; font-weight: bold;")
 
         # --- UI chọn màu & hiệu ứng Sub ---
-        self.sub_options_frame = QFrame()
-        sub_opt_layout = QHBoxLayout(self.sub_options_frame)
-        sub_opt_layout.setContentsMargins(5, 0, 5, 0)
+        self.btn_pick_color = QPushButton("🎨 Chọn Màu Chữ")
+        self.btn_pick_color.clicked.connect(self.pick_sub_color)
+        self.current_sub_color = "#FFFF00"  # Mặc định vàng
+        self.lbl_color_demo = QLabel()
+        self.lbl_color_demo.setFixedSize(20, 20)
+        self.lbl_color_demo.setStyleSheet(f"background-color: {self.current_sub_color}; border: 1px solid white;")
 
-        self.btn_sub_color = QPushButton("🎨 Màu Sub")
-        self.btn_sub_color.setStyleSheet("background-color: #FFFF00; color: black; font-weight: bold; border-radius: 4px; padding: 4px 8px;")
-        self.btn_sub_color.clicked.connect(self.pick_sub_color)
-        self.sub_color_hex = "#FFFF00"  # Mặc định vàng
+        self.combo_effect = QComboBox()
+        self.combo_effect.addItems(["Karaoke (Chữ chạy)", "Hiện từng dòng"])
 
-        self.combo_sub_effect = QComboBox()
-        self.combo_sub_effect.addItems(["Karaoke", "Normal"])
-        self.combo_sub_effect.setStyleSheet("font-weight: bold;")
+        color_layout = QHBoxLayout()
+        color_layout.addWidget(self.btn_pick_color)
+        color_layout.addWidget(self.lbl_color_demo)
 
-        sub_opt_layout.addWidget(self.btn_sub_color)
-        sub_opt_layout.addWidget(QLabel("Hiệu ứng:"))
-        sub_opt_layout.addWidget(self.combo_sub_effect)
-        self.sub_options_frame.setVisible(False)  # Ẩn khi chưa tick AI Sub
-        self.chk_ai_sub.stateChanged.connect(lambda s: self.sub_options_frame.setVisible(s == 2))
-
-        l_vid.addWidget(self.chk_flip); l_vid.addWidget(self.chk_speed); l_vid.addWidget(self.chk_ai_sub); l_vid.addWidget(self.sub_options_frame); g_vid.setLayout(l_vid)
+        l_vid.addWidget(self.chk_flip); l_vid.addWidget(self.chk_speed); l_vid.addWidget(self.chk_ai_sub)
+        l_vid.addLayout(color_layout)
+        l_vid.addWidget(QLabel("Hiệu ứng:"))
+        l_vid.addWidget(self.combo_effect)
+        g_vid.setLayout(l_vid)
 
         g_aud = QGroupBox("2. ÂM THANH"); l_aud = QHBoxLayout()
         self.chk_mute = QCheckBox("Tắt Tiếng"); self.chk_mute.stateChanged.connect(self.update_audio_visual)
@@ -461,17 +460,19 @@ class EmbeddedEditorWidget(QWidget):
         else: self.lbl_audio.setText("🔊")
 
     def pick_sub_color(self):
-        color = QColorDialog.getColor(QColor(self.sub_color_hex), self, "Chọn Màu Sub")
+        color = QColorDialog.getColor(QColor(self.current_sub_color), self, "Chọn Màu Chữ Sub")
         if color.isValid():
-            self.sub_color_hex = color.name().upper()
-            self.btn_sub_color.setStyleSheet(f"background-color: {self.sub_color_hex}; color: {'black' if color.lightness() > 128 else 'white'}; font-weight: bold; border-radius: 4px; padding: 4px 8px;")
+            self.current_sub_color = color.name()
+            self.lbl_color_demo.setStyleSheet(f"background-color: {self.current_sub_color}; border: 1px solid white;")
 
     def get_options(self):
+        # Map tên hiệu ứng tiếng Việt -> key cho engine
+        effect_map = {"Karaoke (Chữ chạy)": "Karaoke", "Hiện từng dòng": "Normal"}
         return { 
             'flip': self.chk_flip.isChecked(), 'speed_1_1': self.chk_speed.isChecked(), 'mute_audio': self.chk_mute.isChecked(),
             'use_ai_sub': self.chk_ai_sub.isChecked(),
-            'sub_color': self.sub_color_hex,
-            'sub_effect': self.combo_sub_effect.currentText(),
+            'sub_color': self.current_sub_color,
+            'sub_effect': effect_map.get(self.combo_effect.currentText(), "Karaoke"),
             'logo_path': self.lbl_logo_path.property("path") if self.lbl_logo_path.property("path") else "",
             'logo_x': self.sl_x.value(), 'logo_y': self.sl_y.value(), 'logo_scale': self.sl_scale.value(),
             'logo_opacity': self.sl_opacity.value()

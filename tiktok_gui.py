@@ -19,7 +19,7 @@ from faster_whisper import WhisperModel
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, 
                              QHeaderView, QComboBox, QFileDialog, QMessageBox, QMenu, QFrame,
-                             QDialog, QCheckBox, QGroupBox, QTabWidget, QSlider, QSizePolicy, QListWidget, QProgressBar, QTextEdit)
+                             QDialog, QCheckBox, QGroupBox, QTabWidget, QSlider, QSizePolicy, QListWidget, QProgressBar, QTextEdit, QColorDialog)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QTimer, QPoint
 from PyQt6.QtGui import QColor, QFont, QAction, QCursor, QPixmap, QIcon, QPainter, QTransform, QPen
 
@@ -30,26 +30,32 @@ BASE_DATA_FOLDER = "TIKTOK_DATA"
 # ============================================================================
 class AISubtitleGenerator:
     def __init__(self):
-        # Chạy GPU (CUDA) cho nhanh - int8_float16 để an toàn với 1060 3GB VRAM
+        # Nâng cấp lên model có word_timestamps
         self.model = WhisperModel("base", device="cuda", compute_type="int8_float16")
 
-    def format_time(self, seconds):
+    def format_time_ass(self, seconds):
         m, s = divmod(seconds, 60)
         h, m = divmod(m, 60)
         return f"{int(h)}:{int(m):02d}:{s:05.2f}"
 
-    def create_sub(self, video_path, output_ass):
-        segments, info = self.model.transcribe(video_path, beam_size=5, language="vi")
+    def create_sub_karaoke(self, video_path, output_ass, color_hex="#FFFF00", effect_type="Karaoke"):
+        # Chuyển Hex (RGB) sang định dạng ASS (BGR)
+        r = color_hex[1:3]
+        g = color_hex[3:5]
+        b = color_hex[5:7]
+        ass_color = f"&H00{b}{g}{r}&"
+
+        # Transcribe với word_timestamps để lấy thời gian từng từ
+        segments, info = self.model.transcribe(video_path, beam_size=5, language="vi", word_timestamps=True)
         
-        # Style này giúp chữ hiện ở giữa dưới, màu vàng viền đen (Style Tóp Tóp)
-        ass_header = """[Script Info]
+        ass_header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
 PlayResY: 1920
 
 [V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: TikTokStyle,Arial,75,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,0,2,10,10,250,1
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: TikTokStyle,Arial,85,{ass_color},&H00FFFFFF&,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,0,2,10,10,400,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -57,10 +63,27 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         with open(output_ass, "w", encoding="utf-8") as f:
             f.write(ass_header)
             for segment in segments:
-                start = self.format_time(segment.start)
-                end = self.format_time(segment.end)
-                text = segment.text.strip().upper() # Viết hoa cho chuyên nghiệp
-                f.write(f"Dialogue: 0,{start},{end},TikTokStyle,,0,0,0,,{text}\n")
+                words = list(segment.words)
+                if not words: continue
+
+                # Giới hạn dòng: Cứ 5 từ thì ngắt 1 câu để tránh tràn màn hình
+                chunk_size = 5 
+                for i in range(0, len(words), chunk_size):
+                    chunk = words[i:i + chunk_size]
+                    start_time = self.format_time_ass(chunk[0].start)
+                    end_time = self.format_time_ass(chunk[-1].end)
+                    
+                    # Tạo hiệu ứng Karaoke
+                    line_text = ""
+                    for w in chunk:
+                        duration = int((w.end - w.start) * 100) # Centiseconds
+                        clean_word = w.word.strip().upper()
+                        if effect_type == "Karaoke":
+                            line_text += f"{{\\k{duration}}}{clean_word} "
+                        else:
+                            line_text += f"{clean_word} "
+                    
+                    f.write(f"Dialogue: 0,{start_time},{end_time},TikTokStyle,,0,0,0,,{line_text.strip()}\n")
         return True
 
 # ============================================================================
@@ -255,7 +278,11 @@ class RenderWorker(QThread):
                 self.progress_signal.emit(int((i / total) * 100), f"🧠 AI đang nghe: {name_no_ext[:15]}...")
                 ass_path = os.path.join(render_folder, f"{name_no_ext}.ass")
                 try:
-                    self.ai_sub.create_sub(input_path, ass_path)
+                    self.ai_sub.create_sub_karaoke(
+                        input_path, ass_path,
+                        color_hex=self.options.get('sub_color', '#FFFF00'),
+                        effect_type=self.options.get('sub_effect', 'Karaoke')
+                    )
                     self.options['sub_path'] = ass_path
                 except Exception as e:
                     self.progress_signal.emit(int((i / total) * 100), f"⚠️ Lỗi AI Sub: {str(e)}")
@@ -311,7 +338,28 @@ class EmbeddedEditorWidget(QWidget):
         self.chk_speed = QCheckBox("Tăng Tốc 1.1x")
         self.chk_ai_sub = QCheckBox("🧠 Tạo Sub Tiếng Việt (AI)")
         self.chk_ai_sub.setStyleSheet("color: #d63384; font-weight: bold;")
-        l_vid.addWidget(self.chk_flip); l_vid.addWidget(self.chk_speed); l_vid.addWidget(self.chk_ai_sub); g_vid.setLayout(l_vid)
+
+        # --- Nút chọn màu ---
+        self.btn_pick_color = QPushButton("🎨 Chọn Màu Chữ")
+        self.btn_pick_color.clicked.connect(self.pick_sub_color)
+        self.current_sub_color = "#FFFF00"  # Mặc định vàng
+        self.lbl_color_demo = QLabel()
+        self.lbl_color_demo.setFixedSize(20, 20)
+        self.lbl_color_demo.setStyleSheet(f"background-color: {self.current_sub_color}; border: 1px solid white;")
+
+        # --- Chọn hiệu ứng ---
+        self.combo_effect = QComboBox()
+        self.combo_effect.addItems(["Karaoke (Chữ chạy)", "Hiện từng dòng"])
+
+        color_layout = QHBoxLayout()
+        color_layout.addWidget(self.btn_pick_color)
+        color_layout.addWidget(self.lbl_color_demo)
+
+        l_vid.addWidget(self.chk_flip); l_vid.addWidget(self.chk_speed); l_vid.addWidget(self.chk_ai_sub)
+        l_vid.addLayout(color_layout)
+        l_vid.addWidget(QLabel("Hiệu ứng:"))
+        l_vid.addWidget(self.combo_effect)
+        g_vid.setLayout(l_vid)
 
         g_aud = QGroupBox("2. ÂM THANH"); l_aud = QHBoxLayout()
         self.chk_mute = QCheckBox("Tắt Tiếng"); self.chk_mute.stateChanged.connect(self.update_audio_visual)
@@ -411,10 +459,20 @@ class EmbeddedEditorWidget(QWidget):
         if self.chk_mute.isChecked(): self.lbl_audio.setText("🔇")
         else: self.lbl_audio.setText("🔊")
 
+    def pick_sub_color(self):
+        color = QColorDialog.getColor(QColor(self.current_sub_color), self, "Chọn Màu Chữ Sub")
+        if color.isValid():
+            self.current_sub_color = color.name()
+            self.lbl_color_demo.setStyleSheet(f"background-color: {self.current_sub_color}; border: 1px solid white;")
+
     def get_options(self):
+        # Map tên hiệu ứng tiếng Việt -> key cho engine
+        effect_map = {"Karaoke (Chữ chạy)": "Karaoke", "Hiện từng dòng": "Normal"}
         return { 
             'flip': self.chk_flip.isChecked(), 'speed_1_1': self.chk_speed.isChecked(), 'mute_audio': self.chk_mute.isChecked(),
             'use_ai_sub': self.chk_ai_sub.isChecked(),
+            'sub_color': self.current_sub_color,
+            'sub_effect': effect_map.get(self.combo_effect.currentText(), "Karaoke"),
             'logo_path': self.lbl_logo_path.property("path") if self.lbl_logo_path.property("path") else "",
             'logo_x': self.sl_x.value(), 'logo_y': self.sl_y.value(), 'logo_scale': self.sl_scale.value(),
             'logo_opacity': self.sl_opacity.value()
