@@ -1,5 +1,10 @@
 import sys
 import os
+
+# Ép Tool tìm thư viện CUDA ở ổ D (không chiếm ổ C)
+sys.path.insert(0, r"D:\AI_Fix")
+os.environ["PATH"] += os.pathsep + r"D:\AI_Fix\nvidia\cublas\lib"
+os.environ["PATH"] += os.pathsep + r"D:\AI_Fix\nvidia\cudnn\lib"
 import asyncio
 import pandas as pd
 from datetime import datetime
@@ -8,18 +13,82 @@ import requests
 import subprocess 
 import re 
 from playwright.async_api import async_playwright
+# --- THÊM THƯ VIỆN AI ---
+from faster_whisper import WhisperModel
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, 
                              QHeaderView, QComboBox, QFileDialog, QMessageBox, QMenu, QFrame,
-                             QDialog, QCheckBox, QGroupBox, QTabWidget, QSlider, QSizePolicy, QListWidget, QProgressBar, QTextEdit)
+                             QDialog, QCheckBox, QGroupBox, QTabWidget, QSlider, QSizePolicy, QListWidget, QProgressBar, QTextEdit, QColorDialog)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QTimer, QPoint
 from PyQt6.QtGui import QColor, QFont, QAction, QCursor, QPixmap, QIcon, QPainter, QTransform, QPen
 
 BASE_DATA_FOLDER = "TIKTOK_DATA"
 
 # ============================================================================
-# 1. RENDER ENGINE (ĐÃ SỬA LỖI LẬT NGƯỢC/XUÔI)
+# 0. AI SUBTITLE GENERATOR (NEW)
+# ============================================================================
+class AISubtitleGenerator:
+    def __init__(self):
+        # Nâng cấp lên model có word_timestamps
+        self.model = WhisperModel("base", device="cuda", compute_type="int8_float16")
+
+    def format_time_ass(self, seconds):
+        m, s = divmod(seconds, 60)
+        h, m = divmod(m, 60)
+        return f"{int(h)}:{int(m):02d}:{s:05.2f}"
+
+    def create_sub_karaoke(self, video_path, output_ass, color_hex="#FFFF00", effect_type="Karaoke"):
+        # Chuyển Hex (RGB) sang định dạng ASS (BGR)
+        # Ví dụ: #FF0000 (Đỏ) -> &H0000FF&
+        r = color_hex[1:3]
+        g = color_hex[3:5]
+        b = color_hex[5:7]
+        ass_color = f"&H00{b}{g}{r}&"
+
+        # Transcribe với word_timestamps để lấy thời gian từng từ
+        segments, info = self.model.transcribe(video_path, beam_size=5, language="vi", word_timestamps=True)
+        
+        ass_header = f"""[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: TikTokStyle,Arial,85,{ass_color},&H00FFFFFF&,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,0,2,10,10,400,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+        with open(output_ass, "w", encoding="utf-8") as f:
+            f.write(ass_header)
+            for segment in segments:
+                words = list(segment.words)
+                if not words: continue
+
+                # Giới hạn dòng: Cứ 5 từ thì ngắt 1 câu để tránh tràn màn hình
+                chunk_size = 5 
+                for i in range(0, len(words), chunk_size):
+                    chunk = words[i:i + chunk_size]
+                    start_time = self.format_time_ass(chunk[0].start)
+                    end_time = self.format_time_ass(chunk[-1].end)
+                    
+                    # Tạo hiệu ứng Karaoke
+                    line_text = ""
+                    for w in chunk:
+                        duration = int((w.end - w.start) * 100) # Centiseconds
+                        clean_word = w.word.strip().upper()
+                        if effect_type == "Karaoke":
+                            line_text += f"{{\\k{duration}}}{clean_word} "
+                        else:
+                            line_text += f"{clean_word} "
+                    
+                    f.write(f"Dialogue: 0,{start_time},{end_time},TikTokStyle,,0,0,0,,{line_text.strip()}\n")
+        return True
+
+# ============================================================================
+# 1. RENDER ENGINE (CẬP NHẬT FILTER SUB)
 # ============================================================================
 class RenderEngine:
     def __init__(self):
@@ -42,18 +111,22 @@ class RenderEngine:
         cmd = [self.ffmpeg_exe, '-y', '-i', input_path]
         filter_chain = []
         
-        # 1. Xử lý Video nền (Flip, Speed)
+        # 1. Video Filters cơ bản
         bg_filters = []
         if options['flip']: bg_filters.append("hflip") # Lật ngang
         if options['speed_1_1']: bg_filters.append("setpts=PTS/1.1")
         
-        # Đặt tên cho stream video nền sau khi xử lý là [bg]
+        # 2. XỬ LÝ SUBTITLES (MỚI)
+        if options.get('sub_path'):
+            # FFmpeg yêu cầu escape đường dẫn sub (thay \ thành / và : thành \:)
+            escaped_sub = options['sub_path'].replace("\\", "/").replace(":", "\\:")
+            bg_filters.append(f"subtitles='{escaped_sub}':force_style='Alignment=2'")
+
+        # Gộp filter cho video gốc
         if bg_filters:
-            # Lệnh: [0:v]hflip,setpts=...[bg]
             filter_chain.append(f"[0:v]{','.join(bg_filters)}[bg]")
             bg_stream = "[bg]"
         else:
-            # Nếu không filter gì cả, đặt tên [0:v] thành [bg] (qua lệnh null) để thống nhất
             filter_chain.append("[0:v]null[bg]")
             bg_stream = "[bg]"
 
@@ -182,19 +255,49 @@ class ScraperWorker(QThread):
 class RenderWorker(QThread):
     progress_signal = pyqtSignal(int, str)
     finished_signal = pyqtSignal()
-    def __init__(self, items, options): super().__init__(); self.items = items; self.options = options; self.engine = RenderEngine()
+    def __init__(self, items, options):
+        super().__init__()
+        self.items = items
+        self.options = options
+        self.engine = RenderEngine()
+        self.ai_sub = AISubtitleGenerator() if options.get('use_ai_sub') else None # Khởi tạo AI nếu cần
+
     def run(self):
         total = len(self.items)
         for i, item in enumerate(self.items):
             input_path = item['Local_Path']
             if not input_path or not os.path.exists(input_path): continue
-            folder = os.path.dirname(input_path); render_folder = os.path.join(folder, "Rendered"); os.makedirs(render_folder, exist_ok=True)
-            name = os.path.basename(input_path); name_no_ext, ext = os.path.splitext(name)
-            output_path = os.path.join(render_folder, f"{name_no_ext}_EDITED{ext}")
-            self.progress_signal.emit(int((i / total) * 100), f"🎬 Render ({i+1}/{total}): {name[:20]}...")
+            
+            folder = os.path.dirname(input_path)
+            render_folder = os.path.join(folder, "Rendered")
+            os.makedirs(render_folder, exist_ok=True)
+            name_no_ext = os.path.splitext(os.path.basename(input_path))[0]
+            output_path = os.path.join(render_folder, f"{name_no_ext}_EDITED.mp4")
+
+            # --- BƯỚC MỚI: TẠO SUB BẰNG AI ---
+            if self.ai_sub:
+                self.progress_signal.emit(int((i / total) * 100), f"🧠 AI đang nghe: {name_no_ext[:15]}...")
+                ass_path = os.path.join(render_folder, f"{name_no_ext}.ass")
+                try:
+                    self.ai_sub.create_sub_karaoke(
+                        input_path, ass_path,
+                        color_hex=self.options.get('sub_color', '#FFFF00'),
+                        effect_type=self.options.get('sub_effect', 'Karaoke')
+                    )
+                    self.options['sub_path'] = ass_path
+                except Exception as e:
+                    self.progress_signal.emit(int((i / total) * 100), f"⚠️ Lỗi AI Sub: {str(e)}")
+                    self.options['sub_path'] = None
+            else:
+                self.options['sub_path'] = None
+
+            # --- BƯỚC RENDER ---
+            self.progress_signal.emit(int((i / total) * 100), f"🎬 Rendering ({i+1}/{total}): {name_no_ext[:15]}...")
             success, msg = self.engine.render_video(input_path, output_path, self.options)
-            if success: self.progress_signal.emit(int(((i+1) / total) * 100), f"✅ Xong: {name[:20]}")
+            
+            if success: self.progress_signal.emit(int(((i+1) / total) * 100), f"✅ Xong: {name_no_ext[:15]}")
             else: self.progress_signal.emit(int(((i+1) / total) * 100), f"❌ Lỗi: {msg}")
+            
         self.finished_signal.emit()
 
 # ============================================================================
@@ -233,7 +336,31 @@ class EmbeddedEditorWidget(QWidget):
         left_panel = QFrame(); left_panel.setFixedWidth(300); left_layout = QVBoxLayout(left_panel)
         g_vid = QGroupBox("1. HÌNH ẢNH"); l_vid = QVBoxLayout()
         self.chk_flip = QCheckBox("Lật Ngược"); self.chk_flip.stateChanged.connect(self.update_preview)
-        self.chk_speed = QCheckBox("Tăng Tốc 1.1x"); l_vid.addWidget(self.chk_flip); l_vid.addWidget(self.chk_speed); g_vid.setLayout(l_vid)
+        self.chk_speed = QCheckBox("Tăng Tốc 1.1x")
+        self.chk_ai_sub = QCheckBox("🧠 Tạo Sub Tiếng Việt (AI)")
+        self.chk_ai_sub.setStyleSheet("color: #d63384; font-weight: bold;")
+
+        # --- UI chọn màu & hiệu ứng Sub ---
+        self.sub_options_frame = QFrame()
+        sub_opt_layout = QHBoxLayout(self.sub_options_frame)
+        sub_opt_layout.setContentsMargins(5, 0, 5, 0)
+
+        self.btn_sub_color = QPushButton("🎨 Màu Sub")
+        self.btn_sub_color.setStyleSheet("background-color: #FFFF00; color: black; font-weight: bold; border-radius: 4px; padding: 4px 8px;")
+        self.btn_sub_color.clicked.connect(self.pick_sub_color)
+        self.sub_color_hex = "#FFFF00"  # Mặc định vàng
+
+        self.combo_sub_effect = QComboBox()
+        self.combo_sub_effect.addItems(["Karaoke", "Normal"])
+        self.combo_sub_effect.setStyleSheet("font-weight: bold;")
+
+        sub_opt_layout.addWidget(self.btn_sub_color)
+        sub_opt_layout.addWidget(QLabel("Hiệu ứng:"))
+        sub_opt_layout.addWidget(self.combo_sub_effect)
+        self.sub_options_frame.setVisible(False)  # Ẩn khi chưa tick AI Sub
+        self.chk_ai_sub.stateChanged.connect(lambda s: self.sub_options_frame.setVisible(s == 2))
+
+        l_vid.addWidget(self.chk_flip); l_vid.addWidget(self.chk_speed); l_vid.addWidget(self.chk_ai_sub); l_vid.addWidget(self.sub_options_frame); g_vid.setLayout(l_vid)
 
         g_aud = QGroupBox("2. ÂM THANH"); l_aud = QHBoxLayout()
         self.chk_mute = QCheckBox("Tắt Tiếng"); self.chk_mute.stateChanged.connect(self.update_audio_visual)
@@ -333,9 +460,18 @@ class EmbeddedEditorWidget(QWidget):
         if self.chk_mute.isChecked(): self.lbl_audio.setText("🔇")
         else: self.lbl_audio.setText("🔊")
 
+    def pick_sub_color(self):
+        color = QColorDialog.getColor(QColor(self.sub_color_hex), self, "Chọn Màu Sub")
+        if color.isValid():
+            self.sub_color_hex = color.name().upper()
+            self.btn_sub_color.setStyleSheet(f"background-color: {self.sub_color_hex}; color: {'black' if color.lightness() > 128 else 'white'}; font-weight: bold; border-radius: 4px; padding: 4px 8px;")
+
     def get_options(self):
         return { 
-            'flip': self.chk_flip.isChecked(), 'speed_1_1': self.chk_speed.isChecked(), 'mute_audio': self.chk_mute.isChecked(), 
+            'flip': self.chk_flip.isChecked(), 'speed_1_1': self.chk_speed.isChecked(), 'mute_audio': self.chk_mute.isChecked(),
+            'use_ai_sub': self.chk_ai_sub.isChecked(),
+            'sub_color': self.sub_color_hex,
+            'sub_effect': self.combo_sub_effect.currentText(),
             'logo_path': self.lbl_logo_path.property("path") if self.lbl_logo_path.property("path") else "",
             'logo_x': self.sl_x.value(), 'logo_y': self.sl_y.value(), 'logo_scale': self.sl_scale.value(),
             'logo_opacity': self.sl_opacity.value()
