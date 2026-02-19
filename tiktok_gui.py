@@ -1,5 +1,10 @@
 import sys
 import os
+
+# Ép Tool tìm thư viện CUDA ở ổ D (không chiếm ổ C)
+sys.path.insert(0, r"D:\AI_Fix")
+os.environ["PATH"] += os.pathsep + r"D:\AI_Fix\nvidia\cublas\lib"
+os.environ["PATH"] += os.pathsep + r"D:\AI_Fix\nvidia\cudnn\lib"
 import asyncio
 import pandas as pd
 from datetime import datetime
@@ -25,14 +30,8 @@ BASE_DATA_FOLDER = "TIKTOK_DATA"
 # ============================================================================
 class AISubtitleGenerator:
     def __init__(self):
-        # Tự động chọn CUDA (GPU) nếu có, không thì dùng CPU
-        try:
-            result = subprocess.run(["nvidia-smi"], capture_output=True, startupinfo=subprocess.STARTUPINFO())
-            device = "cuda" if result.returncode == 0 else "cpu"
-        except FileNotFoundError:
-            device = "cpu"
-        # Dùng model 'base' để cân bằng giữa tốc độ và độ chính xác tiếng Việt
-        self.model = WhisperModel("base", device=device, compute_type="int8")
+        # Chạy GPU (CUDA) cho nhanh - int8_float16 để an toàn với 1060 3GB VRAM
+        self.model = WhisperModel("base", device="cuda", compute_type="int8_float16")
 
     def format_time(self, seconds):
         m, s = divmod(seconds, 60)

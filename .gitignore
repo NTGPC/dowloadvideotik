@@ -36,6 +36,11 @@ ffmpeg-master-latest-win64-gpl.zip
 *.gif
 *.webp
 
+# Bỏ qua các file âm thanh
+*.mp3
+*.wav
+*.flac
+
 # Python cache
 __pycache__/
 *.py[cod]
