@@ -5,6 +5,7 @@ Downloads/
 # Bỏ qua Chrome profiles và drivers (file lớn)
 chrome_profile/
 tiktok_scraper_profile/
+tiktok_profile/
 drivers/
 chromedriver.exe
 

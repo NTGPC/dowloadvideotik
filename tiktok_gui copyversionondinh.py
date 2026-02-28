@@ -15,6 +15,7 @@ import re
 from playwright.async_api import async_playwright
 # --- THÊM THƯ VIỆN AI ---
 from faster_whisper import WhisperModel
+from playwright_stealth import stealth_async
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, 
@@ -38,7 +39,7 @@ class AISubtitleGenerator:
         h, m = divmod(m, 60)
         return f"{int(h)}:{int(m):02d}:{s:05.2f}"
 
-    def create_sub_karaoke(self, video_path, output_ass, color_hex="#FFFF00", effect_type="Karaoke"):
+    def create_sub_karaoke(self, video_path, output_ass, color_hex="#FFFF00", effect_type="Karaoke", margin_v=500):
         # Chuyển Hex (RGB) sang định dạng ASS (BGR)
         r, g, b = color_hex[1:3], color_hex[3:5], color_hex[5:7]
         ass_color = f"&H00{b}{g}{r}&" # Màu bro chọn (Màu sáng lên)
@@ -47,7 +48,7 @@ class AISubtitleGenerator:
         # Transcribe lấy thời gian từng từ
         segments, info = self.model.transcribe(video_path, beam_size=5, language="vi", word_timestamps=True)
         
-        # Style này cực giống TikTok: Chữ to (95), viền dày (5), nằm cao (MarginV: 500)
+        # Style này cực giống TikTok: Chữ to (95), viền dày (5), vị trí do bro chọn
         ass_header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
@@ -55,7 +56,7 @@ PlayResY: 1920
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: TikTokStyle,Arial,95,{ass_color},{bg_color},&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,5,0,2,10,10,500,1
+Style: TikTokStyle,Arial,95,{ass_color},{bg_color},&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,5,0,2,10,10,{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -215,41 +216,150 @@ class TikTokBackend:
         except Exception as e: return False, str(e), None, None
 
 class ScraperWorker(QThread):
-    progress_signal = pyqtSignal(str); data_signal = pyqtSignal(dict); finished_signal = pyqtSignal()
-    def __init__(self, username): super().__init__(); self.username = username; self.backend = TikTokBackend()
-    def run(self): asyncio.run(self.run_scraper())
+    progress_signal = pyqtSignal(str)
+    data_signal = pyqtSignal(dict)
+    finished_signal = pyqtSignal()
+
+    def __init__(self, username, proxy_str=None):
+        super().__init__()
+        self.username = username
+        self.proxy_str = proxy_str
+        self.backend = TikTokBackend()
+
+    def run(self):
+        asyncio.run(self.run_scraper())
+
     async def run_scraper(self):
-        url = f"https://www.tiktok.com/@{self.username}"
-        self.progress_signal.emit(f"🚀 Mở kênh: {self.username}...")
+        # Xử lý username nếu người dùng nhập có @
+        clean_user = self.username.replace("@", "").strip()
+        url = f"https://www.tiktok.com/@{clean_user}"
+        
+        self.progress_signal.emit(f"🚀 Đang khởi động trình duyệt...")
+        
+        # Thư mục Profile để nhớ đăng nhập
+        user_data_dir = os.path.join(os.getcwd(), "chrome_profile")
+
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=False, args=['--disable-blink-features=AutomationControlled', '--start-maximized'])
-            page = await browser.new_page()
-            try: await page.goto(url, timeout=60000)
-            except: pass
-            self.progress_signal.emit("⚠️ KÉO CAPTCHA!")
-            for i in range(3):
-                self.progress_signal.emit(f"📜 Cuộn {i+1}..."); await page.evaluate('window.scrollTo(0, document.body.scrollHeight)'); await asyncio.sleep(2)
-            self.progress_signal.emit(f"📂 Tải về: {BASE_DATA_FOLDER}/{self.username}...")
-            all_links = await page.query_selector_all('a'); processed = set()
-            for link_obj in all_links:
+            # 1. Setup Proxy
+            proxy_config = None
+            if self.proxy_str and len(self.proxy_str.split(':')) == 4:
+                parts = self.proxy_str.split(':')
+                proxy_config = {
+                    "server": f"http://{parts[0]}:{parts[1]}",
+                    "username": parts[2], "password": parts[3]
+                }
+                self.progress_signal.emit(f"🌐 Proxy: {parts[0]}...")
+            else:
+                self.progress_signal.emit(f"🏠 Mạng thường (No Proxy)...")
+
+            # 2. Launch Browser
+            try:
+                browser = await p.chromium.launch_persistent_context(
+                    user_data_dir,
+                    headless=False, # Hiện trình duyệt
+                    proxy=proxy_config,
+                    args=[
+                        '--disable-blink-features=AutomationControlled',
+                        '--start-maximized',
+                        '--no-sandbox'
+                    ],
+                    viewport=None
+                )
+                
+                page = browser.pages[0]
+                await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
+                self.progress_signal.emit(f"🔗 Vào kênh: {clean_user}")
+                
+                # Tải trang (Timeout 60s)
                 try:
-                    href = await link_obj.get_attribute('href')
-                    if not href or '/video/' not in href: continue
-                    clean_link = href.split('?')[0].strip()
-                    if clean_link in processed: continue
-                    processed.add(clean_link)
-                    self.progress_signal.emit(f"⬇️ Tải: {clean_link[-15:]}...")
-                    success, title, thumb_url, local_path = self.backend.download_video(clean_link, self.username)
-                    views = 0
-                    try: t = await link_obj.inner_text(); views = self.backend.parse_view_count(t)
-                    except: pass
-                    pixmap_data = None
-                    if thumb_url:
-                        try: pixmap_data = requests.get(thumb_url, timeout=5).content
-                        except: pass
-                    self.data_signal.emit({'Link': clean_link, 'Title': title if success else "Error", 'Views': views, 'Status': '✅ Đã tải' if success else '❌ Lỗi', 'Reup_Status': 'Chưa đăng', 'Thumb_Data': pixmap_data, 'Local_Path': local_path})
-                except: continue
-            await browser.close(); self.progress_signal.emit("✨ Xong!"); self.finished_signal.emit()
+                    await page.goto(url, timeout=60000, wait_until='domcontentloaded')
+                except:
+                    self.progress_signal.emit("⚠️ Mạng chậm, vẫn đang cố xử lý...")
+
+                # 3. CHIẾN THUẬT MỚI: KHÔNG CHỜ SELECTOR CỤ THỂ NỮA
+                self.progress_signal.emit("⏳ Đợi 5 giây cho web ổn định...")
+                await asyncio.sleep(5) 
+
+                # Di chuột một chút để kích hoạt JS
+                await page.mouse.move(100, 100)
+                await page.mouse.move(500, 500)
+
+                # 4. CUỘN TRANG BẤT CHẤP (Blind Scroll)
+                self.progress_signal.emit("� Bắt đầu cuộn trang...")
+                for i in range(5): # Tăng lên 5 lần cuộn để lấy nhiều video hơn
+                    await page.mouse.wheel(0, 3000) # Cuộn mạnh xuống
+                    await asyncio.sleep(2) # Nghỉ để TikTok load API
+                    self.progress_signal.emit(f"📜 Đang cuộn lần {i+1}...")
+
+                # 5. QUÉT TOÀN BỘ LINK (Get All Links)
+                self.progress_signal.emit("🔍 Đang lọc video từ trang...")
+                
+                # Lấy tất cả thẻ 'a' trên trang, không cần class cụ thể
+                all_elements = await page.query_selector_all('a')
+                
+                processed = set()
+                count = 0
+
+                for el in all_elements:
+                    try:
+                        href = await el.get_attribute('href')
+                        if not href: continue
+                        
+                        # Chỉ cần link có chứa "/video/" là lụm
+                        if '/video/' in href:
+                            clean_link = href.split('?')[0].strip()
+                            # Kiểm tra trùng lặp
+                            if clean_link in processed: continue
+                            processed.add(clean_link)
+                            
+                            count += 1
+                            self.progress_signal.emit(f"⬇️ Tìm thấy: {clean_link[-15:]}...")
+                            
+                            # Download
+                            success, title, thumb_url, local_path = self.backend.download_video(clean_link, clean_user)
+                            
+                            # Lấy view (Cố gắng lấy text bên trong thẻ a hoặc thẻ cha)
+                            views = 0
+                            try:
+                                text = await el.inner_text()
+                                if text: views = self.backend.parse_view_count(text)
+                            except: pass
+
+                            # Lấy ảnh preview
+                            pixmap_data = None
+                            if thumb_url:
+                                try: pixmap_data = requests.get(thumb_url, timeout=3).content
+                                except: pass
+
+                            video_data = {
+                                'Link': clean_link,
+                                'Title': title if success else "Error",
+                                'Views': views,
+                                'Status': '✅ Đã tải' if success else '❌ Lỗi',
+                                'Reup_Status': 'Chưa đăng',
+                                'Thumb_Data': pixmap_data,
+                                'Local_Path': local_path
+                            }
+                            self.data_signal.emit(video_data)
+                    except: continue
+                
+                if count == 0:
+                    self.progress_signal.emit("❌ KHÔNG THẤY VIDEO! (Có thể bị Captcha chặn hoặc Kênh Trống)")
+                    # Giữ lại trình duyệt 30s để Bro kiểm tra
+                    await asyncio.sleep(30)
+                else:
+                    self.progress_signal.emit(f"✨ XONG! Tổng cộng: {count} video.")
+                
+                await browser.close()
+                self.finished_signal.emit()
+
+            except Exception as e:
+                self.progress_signal.emit(f"❌ LỖI HỆ THỐNG: {str(e)}")
+
+
+
+
 
 class RenderWorker(QThread):
     progress_signal = pyqtSignal(int, str)
@@ -281,7 +391,8 @@ class RenderWorker(QThread):
                     self.ai_sub.create_sub_karaoke(
                         input_path, ass_path,
                         color_hex=self.options.get('sub_color', '#FFFF00'),
-                        effect_type=self.options.get('sub_effect', 'Karaoke')
+                        effect_type=self.options.get('sub_effect', 'Karaoke'),
+                        margin_v=self.options.get('sub_margin_v', 500)
                     )
                     self.options['sub_path'] = ass_path
                 except Exception as e:
@@ -355,10 +466,18 @@ class EmbeddedEditorWidget(QWidget):
         color_layout.addWidget(self.btn_pick_color)
         color_layout.addWidget(self.lbl_color_demo)
 
+        # --- Thanh chỉnh vị trí Sub ---
+        l_vid.addWidget(QLabel("Vị trí Sub (Cao/Thấp):"))
+        self.sl_sub_y = QSlider(Qt.Orientation.Horizontal)
+        self.sl_sub_y.setRange(100, 1700)
+        self.sl_sub_y.setValue(500)
+        self.sl_sub_y.valueChanged.connect(self.update_preview)
+
         l_vid.addWidget(self.chk_flip); l_vid.addWidget(self.chk_speed); l_vid.addWidget(self.chk_ai_sub)
         l_vid.addLayout(color_layout)
         l_vid.addWidget(QLabel("Hiệu ứng:"))
         l_vid.addWidget(self.combo_effect)
+        l_vid.addWidget(self.sl_sub_y)
         g_vid.setLayout(l_vid)
 
         g_aud = QGroupBox("2. ÂM THANH"); l_aud = QHBoxLayout()
@@ -430,12 +549,34 @@ class EmbeddedEditorWidget(QWidget):
     def update_preview(self):
         if not self.original_pixmap: return
         preview = self.original_pixmap.copy()
+        
+        # 1. Vẽ lật ngược nếu có
         if self.chk_flip.isChecked():
             preview = preview.transformed(QTransform().scale(-1, 1), Qt.TransformationMode.SmoothTransformation)
         
+        painter = QPainter(preview)
+        
+        # 2. VẼ CHỮ SUB MẪU ĐỂ XEM TRƯỚC VỊ TRÍ
+        if self.chk_ai_sub.isChecked():
+            font = QFont("Arial", 80, QFont.Weight.Bold)
+            painter.setFont(font)
+            
+            # Tính toán vị trí dựa trên slider (MarginV tính từ đáy lên)
+            margin_v = self.sl_sub_y.value()
+            # PlayResY của sub là 1920, ta tính vị trí Y trên ảnh gốc
+            y_pos = preview.height() - int((margin_v / 1920) * preview.height())
+            
+            # Vẽ viền đen cho chữ mẫu
+            painter.setPen(QPen(Qt.GlobalColor.black, 10))
+            painter.drawText(0, y_pos - 100, preview.width(), 150, Qt.AlignmentFlag.AlignCenter, "MẪU CHỮ CHẠY")
+            
+            # Vẽ chữ màu bro chọn
+            painter.setPen(QColor(self.current_sub_color))
+            painter.drawText(0, y_pos - 100, preview.width(), 150, Qt.AlignmentFlag.AlignCenter, "MẪU CHỮ CHẠY")
+
+        # 3. Vẽ Logo nếu có
         logo_path = self.lbl_logo_path.property("path")
         if logo_path and os.path.exists(logo_path):
-            painter = QPainter(preview)
             logo_pix = QPixmap(logo_path)
             scale_percent = self.sl_scale.value() / 100
             new_w = int(preview.width() * scale_percent)
@@ -446,8 +587,9 @@ class EmbeddedEditorWidget(QWidget):
             
             pos_x = int((preview.width() - logo_pix.width()) * (self.sl_x.value() / 100))
             pos_y = int((preview.height() - logo_pix.height()) * (self.sl_y.value() / 100))
-            painter.drawPixmap(pos_x, pos_y, logo_pix); painter.end()
+            painter.drawPixmap(pos_x, pos_y, logo_pix)
 
+        painter.end()
         target_size = self.lbl_screen.size()
         self.lbl_screen.setPixmap(preview.scaled(target_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
 
@@ -464,6 +606,7 @@ class EmbeddedEditorWidget(QWidget):
         if color.isValid():
             self.current_sub_color = color.name()
             self.lbl_color_demo.setStyleSheet(f"background-color: {self.current_sub_color}; border: 1px solid white;")
+            self.update_preview()
 
     def get_options(self):
         # Map tên hiệu ứng tiếng Việt -> key cho engine
@@ -473,6 +616,7 @@ class EmbeddedEditorWidget(QWidget):
             'use_ai_sub': self.chk_ai_sub.isChecked(),
             'sub_color': self.current_sub_color,
             'sub_effect': effect_map.get(self.combo_effect.currentText(), "Karaoke"),
+            'sub_margin_v': self.sl_sub_y.value(),
             'logo_path': self.lbl_logo_path.property("path") if self.lbl_logo_path.property("path") else "",
             'logo_x': self.sl_x.value(), 'logo_y': self.sl_y.value(), 'logo_scale': self.sl_scale.value(),
             'logo_opacity': self.sl_opacity.value()
@@ -499,8 +643,20 @@ class TikTokManagerApp(QMainWindow):
         main = QWidget(); self.setCentralWidget(main); layout = QVBoxLayout(main)
 
         top = QHBoxLayout()
-        top.addWidget(QLabel("Kênh:")); self.txt_user = QLineEdit(); self.txt_user.setPlaceholderText("Nhập ID kênh..."); top.addWidget(self.txt_user)
-        btn_start = QPushButton("🚀 QUÉT TẢI"); btn_start.clicked.connect(self.start_scraping); btn_start.setStyleSheet("background-color:#007bff; color:white; font-weight:bold;"); top.addWidget(btn_start)
+        top.addWidget(QLabel("Kênh:")); self.txt_user = QLineEdit(); self.txt_user.setPlaceholderText("Nhập ID..."); top.addWidget(self.txt_user)
+        
+        # Thêm ô Proxy và nhãn trạng thái
+        top.addWidget(QLabel("Proxy (IP:PORT:U:P):"))
+        self.txt_proxy = QLineEdit()
+        self.txt_proxy.setPlaceholderText("Dán proxy vào đây...")
+        # Dán sẵn cái của bạn để test
+        self.txt_proxy.setText("123.28.194.208:49126:proxymart49126:hJXJBtAm") 
+        top.addWidget(self.txt_proxy)
+
+        btn_start = QPushButton("🚀 QUÉT TẢI"); 
+        btn_start.clicked.connect(self.start_scraping); 
+        btn_start.setStyleSheet("background-color:#007bff; color:white; font-weight:bold;"); 
+        top.addWidget(btn_start)
         btn_folder = QPushButton("📂 FOLDER"); btn_folder.clicked.connect(self.open_folder); btn_folder.setStyleSheet("background-color:#ffc107; color:black;"); top.addWidget(btn_folder)
         btn_load = QPushButton("📥 LOAD DATA"); btn_load.clicked.connect(self.load_excel); top.addWidget(btn_load)
         btn_save = QPushButton("💾 LƯU EXCEL"); btn_save.clicked.connect(self.save_excel); top.addWidget(btn_save)
@@ -575,10 +731,17 @@ class TikTokManagerApp(QMainWindow):
     def render_finished(self): self.editor_widget.btn_render.setEnabled(True); self.editor_widget.log_message("✅ HOÀN TẤT!"); QMessageBox.information(self, "OK", "Đã Render Xong!")
 
     def start_scraping(self):
-        user = self.txt_user.text().strip(); 
+        user = self.txt_user.text().strip()
+        proxy = self.txt_proxy.text().strip() # Lấy proxy từ ô mới thêm
+        
+        if user.startswith("@"): user = user[1:]
         if not user: return
+        
         self.current_username = user; self.table.setRowCount(0); self.video_paths = {}
-        self.worker = ScraperWorker(user)
+        
+        # Truyền thêm biến proxy vào đây
+        self.worker = ScraperWorker(user, proxy) 
+        
         self.worker.progress_signal.connect(lambda t: self.lbl_status.setText(t))
         self.worker.data_signal.connect(self.add_row)
         self.worker.finished_signal.connect(self.finish_scraping)
