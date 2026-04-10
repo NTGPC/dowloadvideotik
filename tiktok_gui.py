@@ -7,16 +7,20 @@ import yt_dlp
 import requests
 import subprocess 
 import re 
+import json
+import pyotp 
 from playwright.async_api import async_playwright
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, 
                              QHeaderView, QComboBox, QFileDialog, QMessageBox, QMenu, QFrame,
-                             QDialog, QCheckBox, QGroupBox, QTabWidget, QSlider, QSizePolicy, QListWidget, QProgressBar, QTextEdit)
+                             QDialog, QCheckBox, QGroupBox, QTabWidget, QSlider, QSizePolicy, QListWidget, QProgressBar, QTextEdit, QPlainTextEdit)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QTimer, QPoint
 from PyQt6.QtGui import QColor, QFont, QAction, QCursor, QPixmap, QIcon, QPainter, QTransform, QPen
 
 BASE_DATA_FOLDER = "TIKTOK_DATA"
+ACCOUNT_FILE = "accounts.json"
+FB_PROFILE_FOLDER = "FB_PROFILES"
 
 # ============================================================================
 # 1. RENDER ENGINE 
@@ -27,37 +31,28 @@ class RenderEngine:
         self.ffmpeg_ready = os.path.exists(self.ffmpeg_exe)
 
     def extract_frame(self, video_path):
-        if not self.ffmpeg_ready:
-            return None
+        if not self.ffmpeg_ready: return None
         try:
             cmd = [self.ffmpeg_exe, '-ss', '00:00:01', '-i', video_path, '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'png', '-']
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, startupinfo=startupinfo)
             return proc.stdout
-        except:
-            return None
+        except: return None
 
     def render_video(self, input_path, output_path, options):
-        if not self.ffmpeg_ready:
-            return False, "Thiếu file ffmpeg.exe!"
-        
+        if not self.ffmpeg_ready: return False, "Thiếu file ffmpeg.exe!"
         cmd = [self.ffmpeg_exe, '-y', '-i', input_path]
         
-        # Filter Chain
         video_filters = []
-        if options['flip']:
-            video_filters.append("hflip")
-        if options['speed_1_1']:
-            video_filters.append("setpts=PTS/1.1")
+        if options['flip']: video_filters.append("hflip")
+        if options['speed_1_1']: video_filters.append("setpts=PTS/1.1")
         
-        # Logic nền [bg]
         bg_node = "[0:v]"
         if video_filters:
             cmd.extend(['-filter_complex', f"[0:v]{','.join(video_filters)}[bg]"])
             bg_node = "[bg]"
             
-        # Logic Logo
         if options['logo_path']:
             cmd.extend(['-i', options['logo_path']])
             scale_pct = options['logo_scale'] / 100.0
@@ -66,41 +61,33 @@ class RenderEngine:
             y_expr = f"(main_h-overlay_h)*{options['logo_y']}/100"
             
             if video_filters:
-                # Nối tiếp: [bg] -> Overlay
                 complex_str = (f"[0:v]{','.join(video_filters)}[bg];"
                                f"[1:v][bg]scale2ref=w=iw*{scale_pct}:h=-1[logo_sized][bg_ref];"
                                f"[logo_sized]format=rgba,colorchannelmixer=aa={opacity_val}[logo_final];"
                                f"[bg_ref][logo_final]overlay=x={x_expr}:y={y_expr}")
-                # Reset cmd filter
                 cmd = [c for c in cmd if c != '-filter_complex'] 
                 cmd.extend(['-filter_complex', complex_str])
             else:
-                # Chưa có filter nền
                 complex_str = (f"[1:v][0:v]scale2ref=w=iw*{scale_pct}:h=-1[logo_sized][bg_ref];"
                                f"[logo_sized]format=rgba,colorchannelmixer=aa={opacity_val}[logo_final];"
                                f"[bg_ref][logo_final]overlay=x={x_expr}:y={y_expr}")
                 cmd.extend(['-filter_complex', complex_str])
         else:
-            if video_filters and not options['logo_path']:
-                cmd.extend(['-map', '[bg]'])
+            if video_filters and not options['logo_path']: cmd.extend(['-map', '[bg]'])
 
-        if options['mute_audio']:
-            pass 
+        if options['mute_audio']: pass 
         elif options['speed_1_1']:
             cmd.extend(['-filter:a', "atempo=1.1"])
             cmd.extend(['-map', '0:a'])
-        else:
-            cmd.extend(['-map', '0:a'])
+        else: cmd.extend(['-map', '0:a'])
 
         cmd.extend(['-c:v', 'h264_nvenc', '-preset', 'p4', '-rc', 'constqp', '-qp', '26', '-pix_fmt', 'yuv420p', '-c:a', 'aac', output_path])
-        
         try:
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             subprocess.run(cmd, check=True, startupinfo=startupinfo)
             return True, "OK"
-        except Exception as e:
-            return False, str(e)
+        except Exception as e: return False, str(e)
 
 # ============================================================================
 # 2. BACKEND & WORKER
@@ -113,18 +100,15 @@ class TikTokBackend:
             elif 'M' in text: return int(float(text.replace('M', '').strip()) * 1000000)
             else: return int(''.join(filter(str.isdigit, text)))
         except: return 0
-
     def download_video(self, link, username, progress_callback=None):
         user_folder = os.path.join(BASE_DATA_FOLDER, username)
         os.makedirs(user_folder, exist_ok=True)
-        
         def my_hook(d):
             if d['status'] == 'downloading':
                 try:
                     p = d.get('_percent_str', '0%').replace('%','')
                     if progress_callback: progress_callback(float(p))
                 except: pass
-
         ydl_opts = {
             'outtmpl': f'{user_folder}/%(title)s [%(id)s].%(ext)s',
             'restrictfilenames': False, 'windowsfilenames': True, 'trim_file_name': 200,
@@ -150,50 +134,33 @@ class ScraperWorker(QThread):
     download_progress_signal = pyqtSignal(str, int) 
     video_finished_signal = pyqtSignal(dict)      
     finished_signal = pyqtSignal()
+    wait_for_user_signal = pyqtSignal() 
 
     def __init__(self, username, proxy_str=None):
         super().__init__()
-        self.username = username
-        self.proxy_str = proxy_str
-        self.backend = TikTokBackend()
-
-    def run(self):
-        asyncio.run(self.run_scraper())
-
+        self.username = username; self.proxy_str = proxy_str; self.backend = TikTokBackend(); self.user_confirmed_start = False 
+    def run(self): asyncio.run(self.run_scraper())
     async def run_scraper(self):
-        clean_user = self.username.replace("@", "").strip()
-        url = f"https://www.tiktok.com/@{clean_user}"
-        self.progress_log_signal.emit(f"🚀 Khởi động...")
-        
-        user_data_dir = os.path.join(os.getcwd(), "chrome_profile")
+        clean_user = self.username.replace("@", "").strip(); url = f"https://www.tiktok.com/@{clean_user}"
+        self.progress_log_signal.emit(f"🚀 Khởi động..."); user_data_dir = os.path.join(os.getcwd(), "chrome_profile")
         async with async_playwright() as p:
             proxy_config = None
             if self.proxy_str and len(self.proxy_str.split(':')) == 4:
-                parts = self.proxy_str.split(':')
-                proxy_config = {"server": f"http://{parts[0]}:{parts[1]}", "username": parts[2], "password": parts[3]}
-            
+                parts = self.proxy_str.split(':'); proxy_config = {"server": f"http://{parts[0]}:{parts[1]}", "username": parts[2], "password": parts[3]}
             try:
-                browser = await p.chromium.launch_persistent_context(
-                    user_data_dir, headless=False, proxy=proxy_config,
-                    args=['--disable-blink-features=AutomationControlled', '--start-maximized', '--no-sandbox'], viewport=None
-                )
-                page = browser.pages[0]
-                await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-                
-                try:
-                    await page.goto(url, timeout=60000, wait_until='domcontentloaded')
+                browser = await p.chromium.launch_persistent_context(user_data_dir, headless=False, proxy=proxy_config, args=['--disable-blink-features=AutomationControlled', '--start-maximized', '--no-sandbox'], viewport=None)
+                page = browser.pages[0]; await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                try: await page.goto(url, timeout=60000, wait_until='domcontentloaded')
                 except: pass
-                
-                self.progress_log_signal.emit("⏳ Đang quét...")
-                await asyncio.sleep(3)
-                
+                self.progress_log_signal.emit("⏳ Đang đợi... (Hãy giải Captcha và bấm OK trên thông báo)")
+                self.wait_for_user_signal.emit() 
+                while not self.user_confirmed_start:
+                    await asyncio.sleep(0.5)
+                    if not browser.pages: self.progress_log_signal.emit("❌ Trình duyệt đã đóng!"); return
+                self.progress_log_signal.emit("✅ BẮT ĐẦU QUÉT...")
                 for i in range(3):
-                    await page.mouse.wheel(0, 2000)
-                    await asyncio.sleep(2)
-                
-                all_elements = await page.query_selector_all('a')
-                processed = set()
-                
+                    self.progress_log_signal.emit(f"📜 Cuộn trang {i+1}..."); await page.mouse.wheel(0, 2000); await asyncio.sleep(2)
+                all_elements = await page.query_selector_all('a'); processed = set()
                 for el in all_elements:
                     try:
                         href = await el.get_attribute('href')
@@ -201,64 +168,103 @@ class ScraperWorker(QThread):
                         clean_link = href.split('?')[0].strip()
                         if clean_link in processed: continue
                         processed.add(clean_link)
-                        
                         self.video_found_signal.emit(clean_link)
-
-                        def update_prog(pct):
-                            self.download_progress_signal.emit(clean_link, int(pct))
-
+                        def update_prog(pct): self.download_progress_signal.emit(clean_link, int(pct))
                         success, title, thumb_url, local_path = self.backend.download_video(clean_link, clean_user, update_prog)
-                        
                         views = 0
-                        try:
-                            t = await el.inner_text()
-                            views = self.backend.parse_view_count(t)
+                        try: t = await el.inner_text(); views = self.backend.parse_view_count(t)
                         except: pass
-
                         pixmap_data = None
                         if thumb_url:
                             try: pixmap_data = requests.get(thumb_url, timeout=3).content
                             except: pass
-
-                        self.video_finished_signal.emit({
-                            'Link': clean_link, 'Title': title if success else "Error",
-                            'Views': views, 'Status': '✅ Đã tải' if success else '❌ Lỗi',
-                            'Reup_Status': 'Chưa đăng', 'Thumb_Data': pixmap_data, 'Local_Path': local_path
-                        })
+                        self.video_finished_signal.emit({'Link': clean_link, 'Title': title if success else "Error", 'Views': views, 'Status': '✅ Đã tải' if success else '❌ Lỗi', 'Reup_Status': 'Chưa đăng', 'Thumb_Data': pixmap_data, 'Local_Path': local_path})
                     except: continue
-                
-                await browser.close()
-                self.finished_signal.emit()
-            except Exception as e:
-                self.progress_log_signal.emit(f"❌ Lỗi: {str(e)}")
+                await browser.close(); self.finished_signal.emit()
+            except Exception as e: self.progress_log_signal.emit(f"❌ Lỗi: {str(e)}")
 
 class RenderWorker(QThread):
-    progress_signal = pyqtSignal(int, str)
-    finished_signal = pyqtSignal()
-    def __init__(self, items, options):
-        super().__init__()
-        self.items = items
-        self.options = options
-        self.engine = RenderEngine()
+    progress_signal = pyqtSignal(int, str); finished_signal = pyqtSignal()
+    def __init__(self, items, options): super().__init__(); self.items = items; self.options = options; self.engine = RenderEngine()
     def run(self):
         total = len(self.items)
         for i, item in enumerate(self.items):
             input_path = item['Local_Path']
             if not input_path or not os.path.exists(input_path): continue
-            folder = os.path.dirname(input_path)
-            render_folder = os.path.join(folder, "Rendered")
-            os.makedirs(render_folder, exist_ok=True)
-            name = os.path.basename(input_path)
-            name_no_ext, ext = os.path.splitext(name)
+            folder = os.path.dirname(input_path); render_folder = os.path.join(folder, "Rendered"); os.makedirs(render_folder, exist_ok=True)
+            name = os.path.basename(input_path); name_no_ext, ext = os.path.splitext(name)
             output_path = os.path.join(render_folder, f"{name_no_ext}_EDITED{ext}")
-            
             self.progress_signal.emit(int((i / total) * 100), f"🎬 Render ({i+1}/{total}): {name[:20]}...")
             success, msg = self.engine.render_video(input_path, output_path, self.options)
-            
             if success: self.progress_signal.emit(int(((i+1) / total) * 100), f"✅ Xong: {name[:20]}")
             else: self.progress_signal.emit(int(((i+1) / total) * 100), f"❌ Lỗi: {msg}")
-            
         self.finished_signal.emit()
+
+# --- CLASS LOGIN FB (UPDATE V14.2 - SMART 2FA) ---
+class FBLoginWorker(QThread):
+    log_signal = pyqtSignal(str)
+    
+    def __init__(self, uid, password, fa2, proxy_str):
+        super().__init__()
+        self.uid = uid; self.password = password; self.fa2 = fa2; self.proxy_str = proxy_str
+
+    def run(self): asyncio.run(self.login_flow())
+
+    async def login_flow(self):
+        self.log_signal.emit(f"🚀 Login: {self.uid}...")
+        user_data_path = os.path.join(os.getcwd(), "FB_PROFILES", self.uid)
+        if not os.path.exists(user_data_path): os.makedirs(user_data_path)
+
+        async with async_playwright() as p:
+            proxy_config = None
+            if self.proxy_str and len(self.proxy_str.split(':')) == 4:
+                parts = self.proxy_str.split(':')
+                proxy_config = {"server": f"http://{parts[0]}:{parts[1]}", "username": parts[2], "password": parts[3]}
+                self.log_signal.emit(f"🌐 Fake IP: {parts[0]}")
+
+            try:
+                browser = await p.chromium.launch_persistent_context(
+                    user_data_path, headless=False, proxy=proxy_config,
+                    args=['--disable-blink-features=AutomationControlled', '--start-maximized'], viewport=None
+                )
+                page = browser.pages[0]
+                await page.goto("https://www.facebook.com/")
+                await asyncio.sleep(5) # Đợi load trang lâu hơn
+
+                # Login nếu chưa vào
+                if await page.query_selector('input[name="email"]'):
+                    self.log_signal.emit("📝 Điền User/Pass...")
+                    await page.fill('input[name="email"]', self.uid)
+                    await page.fill('input[name="pass"]', self.password)
+                    await page.click('button[name="login"]')
+                    
+                    # Đợi 2FA xuất hiện (10s)
+                    self.log_signal.emit("⏳ Đang đợi màn hình 2FA...")
+                    await asyncio.sleep(10)
+                    
+                    # LOGIC 2FA MỚI (LÌ LỢM HƠN)
+                    try:
+                        totp = pyotp.TOTP(self.fa2.replace(" ", ""))
+                        code = totp.now()
+                        self.log_signal.emit(f"🔑 MÃ 2FA CỦA ANH LÀ: {code}")
+                        
+                        # Thử nhập tự động
+                        self.log_signal.emit("🤖 Đang thử nhập mã tự động...")
+                        await page.keyboard.type(code, delay=100) # Gõ chậm từng số
+                        await page.keyboard.press("Enter")
+                    except Exception as ex: 
+                        self.log_signal.emit(f"⚠️ Lỗi 2FA tự động: {ex}")
+
+                self.log_signal.emit("✅ ĐÃ MỞ TRÌNH DUYỆT! ANH HÃY KIỂM TRA.")
+                self.log_signal.emit("👉 Nếu chưa vào được, hãy nhập tay mã 2FA ở trên.")
+                
+                # Vòng lặp vô tận giữ trình duyệt
+                while True:
+                    if not browser.pages: break
+                    await asyncio.sleep(1)
+                
+                self.log_signal.emit("🔒 Đã đóng và lưu Profile.")
+            except Exception as e: self.log_signal.emit(f"❌ Lỗi: {str(e)}")
 
 # ============================================================================
 # 3. WIDGET EDITOR
@@ -362,12 +368,15 @@ class EmbeddedEditorWidget(QWidget):
 class TikTokManagerApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("TIKTOK MANAGER V12.2 - FINAL STABLE (NO ERRORS)")
+        self.setWindowTitle("TIKTOK MANAGER V14.2 - SMART 2FA")
         self.setGeometry(100, 100, 1400, 900)
         self.setStyleSheet("QMainWindow {background-color: #f0f2f5;} QLabel {color: #333; font-weight: bold;}")
         
         self.current_username = ""
         self.video_paths = {}
+        self.accounts = []
+
+        self.load_accounts_from_file()
 
         main = QWidget(); self.setCentralWidget(main); layout = QVBoxLayout(main)
 
@@ -390,9 +399,7 @@ class TikTokManagerApp(QMainWindow):
         fl.addWidget(QLabel("🔍")); fl.addWidget(self.txt_search); fl.addStretch()
         self.combo_status = QComboBox(); self.combo_status.addItems(["All", "Chưa đăng", "✅ ĐÃ ĐĂNG", "🕒 Lên lịch"]); self.combo_status.currentTextChanged.connect(self.apply_filter)
         fl.addWidget(QLabel("📌")); fl.addWidget(self.combo_status); l1.addWidget(filter_frame)
-
         self.lbl_status = QLabel("Sẵn sàng."); l1.addWidget(self.lbl_status)
-
         self.table = QTableWidget(); self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels(["CHỌN", "IMG", "Tiêu Đề", "Views", "Trạng Thái", "QUẢN LÝ", "Link"])
         self.table.verticalHeader().setDefaultSectionSize(70); self.table.setIconSize(QSize(60, 80))
@@ -408,12 +415,112 @@ class TikTokManagerApp(QMainWindow):
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_context_menu)
         l1.addWidget(self.table)
-        self.tabs.addTab(tab1, "🎬 1. DANH SÁCH VIDEO")
+        self.tabs.addTab(tab1, "🎬 1. DANH SÁCH")
 
         self.editor_widget = EmbeddedEditorWidget()
         self.editor_widget.render_requested.connect(self.start_batch_render)
         self.tabs.addTab(self.editor_widget, "🏭 2. XƯỞNG RENDER")
+
+        self.setup_tab_accounts()
         self.tabs.currentChanged.connect(self.on_tab_changed)
+
+    def setup_tab_accounts(self):
+        tab3 = QWidget(); l3 = QVBoxLayout(tab3)
+        import_group = QGroupBox("Thêm Tài Khoản (Dán chuỗi: User|Pass|2FA|Mail|PassMail|Proxy)")
+        l_imp = QHBoxLayout()
+        self.txt_import = QPlainTextEdit(); self.txt_import.setPlaceholderText("Dán danh sách nick vào đây..."); self.txt_import.setFixedHeight(60)
+        btn_import = QPushButton("➕ IMPORT"); btn_import.clicked.connect(self.import_accounts); btn_import.setFixedSize(100, 60); btn_import.setStyleSheet("background:green; color:white;")
+        l_imp.addWidget(self.txt_import); l_imp.addWidget(btn_import)
+        import_group.setLayout(l_imp); l3.addWidget(import_group)
+        self.table_acc = QTableWidget(); self.table_acc.setColumnCount(7)
+        self.table_acc.setHorizontalHeaderLabels(["UID", "Password", "2FA", "Proxy", "Trạng Thái", "Login", "Xóa"])
+        self.table_acc.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        l3.addWidget(self.table_acc)
+        self.tabs.addTab(tab3, "🟢 3. QUẢN LÝ NICK")
+        self.refresh_account_table()
+
+    def import_accounts(self):
+        text = self.txt_import.toPlainText().strip()
+        if not text: return
+        lines = text.split('\n')
+        count = 0
+        for line in lines:
+            parts = line.split('|')
+            if len(parts) >= 3:
+                acc = {
+                    'uid': parts[0].strip(), 'pass': parts[1].strip(), '2fa': parts[2].strip(),
+                    'proxy': parts[5].strip() if len(parts) > 5 else "", 'status': 'Chưa Login'
+                }
+                if not any(a['uid'] == acc['uid'] for a in self.accounts):
+                    self.accounts.append(acc); count += 1
+        self.save_accounts_to_file(); self.refresh_account_table(); self.txt_import.clear()
+        QMessageBox.information(self, "OK", f"Đã thêm {count} nick mới!")
+
+    def refresh_account_table(self):
+        self.table_acc.setRowCount(0)
+        for i, acc in enumerate(self.accounts):
+            self.table_acc.insertRow(i)
+            self.table_acc.setItem(i, 0, QTableWidgetItem(acc['uid']))
+            self.table_acc.setItem(i, 1, QTableWidgetItem("******"))
+            self.table_acc.setItem(i, 2, QTableWidgetItem(acc['2fa']))
+            self.table_acc.setItem(i, 3, QTableWidgetItem(acc['proxy']))
+            st = QTableWidgetItem(acc['status'])
+            if "Đã Login" in acc['status']: st.setForeground(QColor("green"))
+            self.table_acc.setItem(i, 4, st)
+            btn_login = QPushButton("🔑 LOGIN"); btn_login.clicked.connect(lambda _, a=acc: self.login_account(a))
+            self.table_acc.setCellWidget(i, 5, btn_login)
+            btn_del = QPushButton("❌"); btn_del.clicked.connect(lambda _, idx=i: self.delete_account(idx))
+            self.table_acc.setCellWidget(i, 6, btn_del)
+
+    def login_account(self, acc):
+        self.login_worker = FBLoginWorker(acc['uid'], acc['pass'], acc['2fa'], acc['proxy'])
+        self.login_worker.log_signal.connect(lambda s: self.lbl_status.setText(s))
+        self.login_worker.start()
+        acc['status'] = "🟢 Đã Login"; self.save_accounts_to_file(); self.refresh_account_table()
+
+    def delete_account(self, index):
+        if QMessageBox.question(self, "Xóa", "Bạn chắc chắn muốn xóa nick này?") == QMessageBox.StandardButton.Yes:
+            del self.accounts[index]; self.save_accounts_to_file(); self.refresh_account_table()
+
+    def load_accounts_from_file(self):
+        if os.path.exists(ACCOUNT_FILE):
+            try:
+                with open(ACCOUNT_FILE, 'r', encoding='utf-8') as f: self.accounts = json.load(f)
+            except: self.accounts = []
+
+    def save_accounts_to_file(self):
+        with open(ACCOUNT_FILE, 'w', encoding='utf-8') as f: json.dump(self.accounts, f, indent=4)
+
+    def toggle_select_all(self):
+        rows = self.table.rowCount()
+        if rows == 0: return
+        first_item = self.table.item(0, 0)
+        new_state = Qt.CheckState.Checked if first_item.checkState() == Qt.CheckState.Unchecked else Qt.CheckState.Unchecked
+        for r in range(rows):
+            if not self.table.isRowHidden(r): self.table.item(r, 0).setCheckState(new_state)
+
+    def on_tab_changed(self, index):
+        if index == 1:
+            items_to_render = []
+            for r in range(self.table.rowCount()):
+                chk_item = self.table.item(r, 0)
+                if chk_item and chk_item.checkState() == Qt.CheckState.Checked:
+                    link = self.table.item(r, 6).text(); path = self.video_paths.get(link)
+                    if path and os.path.exists(path): items_to_render.append({'Local_Path': path, 'Link': link})
+            if not items_to_render:
+                QMessageBox.warning(self, "Chú ý", "Hãy TÍCH CHỌN video ở Tab 1 trước!"); self.tabs.setCurrentIndex(0) 
+            else: self.editor_widget.set_queue(items_to_render)
+
+    def start_batch_render(self, options):
+        if not self.editor_widget.queue_items: QMessageBox.warning(self, "Lỗi", "Danh sách chờ trống!"); return
+        self.editor_widget.btn_render.setEnabled(False); self.editor_widget.log_message("⏳ BẮT ĐẦU RENDER...")
+        self.r_worker = RenderWorker(self.editor_widget.queue_items, options)
+        self.r_worker.progress_signal.connect(self.update_render_progress)
+        self.r_worker.finished_signal.connect(self.render_finished)
+        self.r_worker.start()
+
+    def update_render_progress(self, val, msg): self.editor_widget.update_progress(val); self.editor_widget.log_message(msg)
+    def render_finished(self): self.editor_widget.btn_render.setEnabled(True); self.editor_widget.log_message("✅ HOÀN TẤT!"); QMessageBox.information(self, "OK", "Đã Render Xong!")
 
     def start_scraping(self):
         user = self.txt_user.text().strip(); proxy = self.txt_proxy.text().strip()
@@ -422,13 +529,17 @@ class TikTokManagerApp(QMainWindow):
         self.current_username = user; self.table.setRowCount(0); self.video_paths = {}
         self.worker = ScraperWorker(user, proxy)
         self.worker.progress_log_signal.connect(lambda t: self.lbl_status.setText(t))
-        
         self.worker.video_found_signal.connect(self.on_video_found)
         self.worker.download_progress_signal.connect(self.on_download_progress)
         self.worker.video_finished_signal.connect(self.on_video_finished)
         self.worker.finished_signal.connect(self.finish_scraping)
-        
+        self.worker.wait_for_user_signal.connect(self.show_wait_dialog)
         self.worker.start()
+
+    def show_wait_dialog(self):
+        reply = QMessageBox.information(self, "Đang chờ", "Giải Captcha nếu có, rồi bấm OK để bắt đầu quét!", QMessageBox.StandardButton.Ok)
+        if reply == QMessageBox.StandardButton.Ok:
+            self.worker.user_confirmed_start = True
 
     def on_video_found(self, link):
         r = self.table.rowCount(); self.table.insertRow(r)
@@ -463,73 +574,37 @@ class TikTokManagerApp(QMainWindow):
             cb = QComboBox(); cb.addItems(["Chưa đăng", "✅ ĐÃ ĐĂNG", "🕒 Lên lịch"]); cb.currentTextChanged.connect(self.apply_filter); self.table.setCellWidget(r, 5, cb)
             if data.get('Local_Path'): self.video_paths[data['Link']] = data['Local_Path']
 
-    def toggle_select_all(self):
-        rows = self.table.rowCount()
-        if rows == 0: return
-        first_item = self.table.item(0, 0)
-        new_state = Qt.CheckState.Checked if first_item.checkState() == Qt.CheckState.Unchecked else Qt.CheckState.Unchecked
-        for r in range(rows):
-            if not self.table.isRowHidden(r): self.table.item(r, 0).setCheckState(new_state)
-
-    def on_tab_changed(self, index):
-        if index == 1:
-            items_to_render = []
-            for r in range(self.table.rowCount()):
-                chk_item = self.table.item(r, 0)
-                if chk_item and chk_item.checkState() == Qt.CheckState.Checked:
-                    link = self.table.item(r, 6).text(); path = self.video_paths.get(link)
-                    if path and os.path.exists(path): items_to_render.append({'Local_Path': path, 'Link': link})
-            if not items_to_render:
-                QMessageBox.warning(self, "Chú ý", "Hãy TÍCH CHỌN video ở Tab 1 trước!"); self.tabs.setCurrentIndex(0) 
-            else: self.editor_widget.set_queue(items_to_render)
-
-    def start_batch_render(self, options):
-        if not self.editor_widget.queue_items: QMessageBox.warning(self, "Lỗi", "Danh sách chờ trống!"); return
-        self.editor_widget.btn_render.setEnabled(False); self.editor_widget.log_message("⏳ BẮT ĐẦU RENDER...")
-        self.r_worker = RenderWorker(self.editor_widget.queue_items, options)
-        self.r_worker.progress_signal.connect(self.update_render_progress)
-        self.r_worker.finished_signal.connect(self.render_finished)
-        self.r_worker.start()
-
-    def update_render_progress(self, val, msg): self.editor_widget.update_progress(val); self.editor_widget.log_message(msg)
-    def render_finished(self): self.editor_widget.btn_render.setEnabled(True); self.editor_widget.log_message("✅ HOÀN TẤT!"); QMessageBox.information(self, "OK", "Đã Render Xong!")
     def finish_scraping(self): self.lbl_status.setText("✅ Xong!"); QMessageBox.information(self, "OK", "Quét xong!"); self.save_excel()
     def open_folder(self):
         if self.current_username:
             path = os.path.join(BASE_DATA_FOLDER, self.current_username)
             if os.path.exists(path): os.startfile(path)
+
     def save_excel(self):
         if not self.current_username: return
         data = []
         for r in range(self.table.rowCount()):
             cb = self.table.cellWidget(r, 5)
-            # Fix lỗi khi đang tải mà bấm lưu (chưa có item text)
             try: title = self.table.item(r, 2).text()
             except: title = "Downloading..."
             try: view = self.table.item(r, 3).data(Qt.ItemDataRole.EditRole)
             except: view = 0
-            # Check nếu đang là progress bar thì ghi "Đang tải"
             if self.table.cellWidget(r, 4): status = "Đang tải"
             else: status = self.table.item(r, 4).text()
-            
             reup = cb.currentText() if cb else "Chưa đăng"
             link = self.table.item(r, 6).text()
             path = self.video_paths.get(link, "")
-            
             data.append({ 'Tên Video': title, 'Views': view, 'Trạng Thái': status, 'Reup_Status': reup, 'Link': link, 'Local_Path': path })
         df = pd.DataFrame(data)
         path = os.path.join(BASE_DATA_FOLDER, self.current_username)
         os.makedirs(path, exist_ok=True)
         fname = os.path.join(path, f"Report_{self.current_username}.xlsx")
-        
-        # --- FIX LỖI CÚ PHÁP Ở ĐÂY (TÁCH DÒNG) ---
         try:
             with pd.ExcelWriter(fname, engine='xlsxwriter') as writer:
                 df.to_excel(writer, index=False)
             QMessageBox.information(self, "OK", f"Đã lưu: {fname}")
         except Exception as e:
             QMessageBox.critical(self, "Lỗi", str(e))
-        # ----------------------------------------
 
     def load_excel(self):
         start_dir = os.path.join(os.getcwd(), BASE_DATA_FOLDER); 
@@ -554,20 +629,17 @@ class TikTokManagerApp(QMainWindow):
                             if clean_title_excel in clean_str(f): local_path = os.path.join(folder_path, f); found_base = os.path.splitext(f)[0]; break
                     else: found_base = os.path.splitext(os.path.basename(local_path))[0]
                     if found_base:
-                        # Fix logic tìm ảnh (để chắc chắn tìm được ảnh của V5.5)
                         for f in files_in_folder:
-                            # Tìm file bắt đầu bằng found_base và có đuôi ảnh
-                            if f.startswith(found_base) and (f.endswith(".webp") or f.endswith(".jpg") or f.endswith(".image") or f.endswith(".png")):
-                                try: 
-                                    with open(os.path.join(folder_path, f), 'rb') as f_img: 
+                            if f.startswith(found_base) and (f.endswith(".webp") or f.endswith(".jpg") or f.endswith(".image")):
+                                try:
+                                    with open(os.path.join(folder_path, f), 'rb') as f_img:
                                         thumb_data = f_img.read()
                                     break
                                 except: pass
-                    
                     self.add_row_view_mode({'Title': title, 'Views': row.get('Views', 0), 'Status': '✅ Đã tải', 'Reup_Status': row.get('Reup_Status', 'Chưa đăng'), 'Link': link, 'Local_Path': local_path, 'Thumb_Data': thumb_data})
                 self.lbl_status.setText(f"📂 Load xong: {self.current_username}")
             except Exception as e: QMessageBox.critical(self, "Lỗi", str(e))
-    
+
     def add_row_view_mode(self, data):
         r = self.table.rowCount(); self.table.insertRow(r)
         chk = QTableWidgetItem(); chk.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled); chk.setCheckState(Qt.CheckState.Unchecked); self.table.setItem(r, 0, chk)
@@ -591,17 +663,21 @@ class TikTokManagerApp(QMainWindow):
             if txt not in t: show = False
             if fs != "All" and fs != s: show = False
             self.table.setRowHidden(r, not show)
+
     def on_cell_clicked(self, r, c):
         if c in [1, 2]:
             lnk = self.table.item(r, 6).text(); path = self.video_paths.get(lnk)
             if path and os.path.exists(path): os.startfile(path)
             else: os.startfile(lnk)
+
     def show_context_menu(self, pos):
         menu = QMenu(self); copy_action = QAction("📋 Copy Nội Dung", self); copy_action.triggered.connect(self.copy_cell_content); menu.addAction(copy_action)
         copy_link_action = QAction("🔗 Copy Link Gốc", self); copy_link_action.triggered.connect(self.copy_link_row); menu.addAction(copy_link_action); menu.exec(QCursor.pos())
+
     def copy_cell_content(self):
         item = self.table.currentItem(); 
         if item: QApplication.clipboard().setText(item.text())
+
     def copy_link_row(self):
         row = self.table.currentRow(); 
         if row >= 0: QApplication.clipboard().setText(self.table.item(row, 6).text())

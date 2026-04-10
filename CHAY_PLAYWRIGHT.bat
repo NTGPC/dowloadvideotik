@@ -14,7 +14,7 @@ echo =====================================================
 echo.
 
 REM --- CÂU LỆNH NÀY SẼ TỰ ĐỘNG NÂNG CẤP OPENPYXL LÊN BẢN MỚI NHẤT ---
-pip install --upgrade openpyxl pandas xlsxwriter yt-dlp PyQt6 playwright
+pip install --upgrade openpyxl pandas xlsxwriter yt-dlp PyQt6 playwright requests pyotp
 REM ------------------------------------------------------------------
 
 echo.

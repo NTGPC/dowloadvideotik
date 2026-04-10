@@ -84,3 +84,11 @@ desktop.ini
 
 # Logs
 *.log
+
+# Cấu hình bỏ qua theo yêu cầu
+*.doc
+*.txt
+!requirements.txt
+!requirements_playwright.txt
+*.img
+*.exe
